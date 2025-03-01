@@ -32,9 +32,15 @@ main {
 
 /* Collapsed state */
 main.collapsed {
-  height: 60px !important;
-  min-height: 60px;
+  height: 0 !important;
+  min-height: 0;
   overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  margin: 0;
+  padding: 0;
+  border: none;
+  box-shadow: none;
 }
 
 /* Chat toggle button - only visible when chat is collapsed */
@@ -63,10 +69,13 @@ main.collapsed {
   background-color: #3367d6;
 }
 
-/* Only show toggle button when main is collapsed */
-main.collapsed ~ .chat-toggle-btn,
+/* Only show toggle button when chat is hidden */
+.chat-toggle-btn {
+  display: none; /* Hide by default */
+}
+
 body.chat-hidden .chat-toggle-btn {
-  display: flex;
+  display: flex; /* Show when body has chat-hidden class */
 }
 
 /* Collapse button */
@@ -95,12 +104,9 @@ body.chat-hidden .chat-toggle-btn {
 }
 
 /* Switch icon when collapsed */
-main.collapsed .collapse-btn i {
-  transform: rotate(45deg);
-}
-
-main.collapsed .collapse-btn i::before {
-  content: "\f067"; /* fa-plus */
+/* Hide collapse button when collapsed (since main is hidden completely) */
+main.collapsed .collapse-btn {
+  display: none;
 }
 
 h1 {
@@ -225,6 +231,9 @@ h1 {
   flex: 1;
   overflow-y: auto;
   padding: 20px;
+  display: block;
+  position: relative;
+  min-height: 200px; /* Ensure chat log always has some height */
 }
 
 .message {
@@ -234,15 +243,20 @@ h1 {
   display: flex;
   align-items: flex-start;
   position: relative;
+  z-index: 1; /* Ensure messages are above other elements */
 }
 
 .message--sent {
   float: right;
   flex-direction: row-reverse;
+  margin-left: auto; /* Push to the right */
+  margin-right: 10px;
 }
 
 .message--received {
   float: left;
+  margin-right: auto; /* Push to the left */
+  margin-left: 10px;
 }
 
 .message__avatar {

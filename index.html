@@ -11,11 +11,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   </head>
   <body>
-    <!-- Chat toggle button (only visible when chat is collapsed) -->
-    <button id="chat-toggle-btn" class="chat-toggle-btn">
-      <i class="fas fa-comment-dots"></i>
-    </button>
-    
     <main class="center-dock">
       <!-- Collapse button -->
       <button id="collapse-btn" class="collapse-btn">
@@ -150,8 +145,13 @@
       
       // Initialize the app
       document.addEventListener('DOMContentLoaded', () => {
-        loadConversations();
-        createNewConversation();
+        loadConversations().then(convCount => {
+          // Only create a new conversation if there are none
+          if (convCount === 0) {
+            createNewConversation();
+          }
+        });
+        
         setupLayoutControls();
         setupMenuControls();
         setupCollapseControls();
@@ -451,8 +451,16 @@
           const response = await fetch('/api/conversations');
           conversations = await response.json();
           renderConversationList();
+          
+          // If there are conversations, load the first one
+          if (conversations.length > 0) {
+            loadConversation(conversations[0].id);
+          }
+          
+          return conversations.length;
         } catch (error) {
           console.error('Failed to load conversations:', error);
+          return 0;
         }
       }
       
@@ -479,6 +487,7 @@
       // Load a specific conversation
       async function loadConversation(conversationId) {
         try {
+          console.log("Loading conversation:", conversationId);
           currentConversationId = conversationId;
           
           // Clear chat UI
@@ -497,15 +506,29 @@
           
           // Get conversation data
           const response = await fetch(`/api/conversations/${conversationId}`);
+          
+          if (!response.ok) {
+            console.error(`Failed to fetch conversation: ${response.status} ${response.statusText}`);
+            return;
+          }
+          
           const data = await response.json();
+          console.log("Conversation data:", data);
           
           // Display all messages
           if (data.messages && data.messages.length > 0) {
             messages = data.messages;
-            messages.forEach(msg => {
+            console.log(`Rendering ${messages.length} messages`);
+            
+            // Render messages with a small delay between each to allow DOM updates
+            for (const msg of messages) {
               appendMessageToUI(msg);
-            });
+              await new Promise(resolve => setTimeout(resolve, 10));
+            }
+            
             chatLog.scrollTop = chatLog.scrollHeight;
+          } else {
+            console.log("No messages in this conversation");
           }
         } catch (error) {
           console.error(`Failed to load conversation ${conversationId}:`, error);
@@ -734,9 +757,13 @@
       // Handle message submission
       async function handleSubmit(e) {
         e.preventDefault();
+        console.log("Form submitted");
         
         const messageText = messageInput.value.trim();
-        if (!messageText && !currentUploadedFile) return;
+        if (!messageText && !currentUploadedFile) {
+          console.log("No message to send");
+          return;
+        }
         
         // Clear the input
         messageInput.value = '';
@@ -750,19 +777,41 @@
           content: messageText 
         };
         
+        console.log("User message created:", userMessage);
+        
         // If the chat is collapsed, expand it
         const mainElement = document.querySelector('main');
-        if (mainElement.classList.contains('collapsed')) {
+        if (mainElement.classList.contains('collapsed') || document.body.classList.contains('chat-hidden')) {
+          console.log("Expanding collapsed chat");
           mainElement.classList.remove('collapsed');
           document.body.classList.remove('chat-hidden');
           localStorage.setItem('chatCollapsed', 'false');
+          
+          // Give the DOM time to update before continuing
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
         
         // If we are sending a message, add it to the UI
         if (messageText) {
-          // Add user message to UI
-          appendMessageToUI(userMessage);
-          messages.push(userMessage);
+          console.log("Adding user message to UI:", messageText);
+          
+          try {
+            // Add user message to UI first
+            appendMessageToUI(userMessage);
+            messages.push(userMessage);
+            
+            // Ensure chat log is visible and scrolled
+            chatLog.style.display = 'block';
+            chatLog.scrollTop = chatLog.scrollHeight;
+            console.log("Chat state:", {
+              messageCount: messages.length,
+              chatLogChildren: chatLog.children.length,
+              chatLogHeight: chatLog.scrollHeight,
+              mainVisible: !document.querySelector('main').classList.contains('collapsed')
+            });
+          } catch (error) {
+            console.error("Error adding user message:", error);
+          }
         }
         
         // Show typing indicator
@@ -801,10 +850,20 @@
             body: JSON.stringify(requestData)
           });
           
+          if (!response.ok) {
+            throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+          }
+          
           const data = await response.json();
           
+          if (!data || !data.completion) {
+            throw new Error('Invalid response from server');
+          }
+          
           // Remove typing indicator
-          chatLog.removeChild(typingIndicator);
+          if (chatLog.contains(typingIndicator)) {
+            chatLog.removeChild(typingIndicator);
+          }
           
           // Add assistant response to messages and UI
           const assistantMessage = data.completion;
@@ -827,8 +886,11 @@
           }
         } catch (error) {
           console.error('Error sending message:', error);
-          // Remove typing indicator
-          chatLog.removeChild(typingIndicator);
+          
+          // Remove typing indicator if it still exists
+          if (chatLog.contains(typingIndicator)) {
+            chatLog.removeChild(typingIndicator);
+          }
           
           // Show error message
           const errorElement = document.createElement('div');
@@ -838,15 +900,18 @@
               <i class="fas fa-robot"></i>
             </div>
             <div class="message__text">
-              Sorry, there was an error processing your request. Please try again.
+              Sorry, there was an error processing your request: ${error.message || 'Unknown error'}. Please try again.
             </div>
           `;
           chatLog.appendChild(errorElement);
+          chatLog.scrollTop = chatLog.scrollHeight;
         }
       }
       
       // Add a message to the UI
       function appendMessageToUI(message) {
+        console.log("Appending message to UI:", message); // Debug logging
+        
         const messageElement = document.createElement('div');
         messageElement.classList.add('message');
         
@@ -860,20 +925,31 @@
           avatarIcon = 'fa-robot'; // Robot icon for Ralph
         }
         
-        // Convert line breaks to <br> and render markdown-like code blocks
-        let formattedContent = message.content
-          .replace(/\n/g, '<br>')
-          .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
-        
-        // Add avatar and message content
-        messageElement.innerHTML = `
-          <div class="message__avatar">
-            <i class="fas ${avatarIcon}"></i>
-          </div>
-          <div class="message__text">${formattedContent}</div>
-        `;
-        
-        chatLog.appendChild(messageElement);
+        try {
+          // Convert line breaks to <br> and render markdown-like code blocks
+          let formattedContent = '';
+          if (message.content) {
+            formattedContent = message.content
+              .replace(/\n/g, '<br>')
+              .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+          } else {
+            console.error("Message content is undefined:", message);
+            formattedContent = "(Error: Empty message)";
+          }
+          
+          // Add avatar and message content
+          messageElement.innerHTML = `
+            <div class="message__avatar">
+              <i class="fas ${avatarIcon}"></i>
+            </div>
+            <div class="message__text">${formattedContent}</div>
+          `;
+          
+          chatLog.appendChild(messageElement);
+          console.log("Message added to chat log"); // Debug logging
+        } catch (error) {
+          console.error("Error adding message to UI:", error);
+        }
       }
       
       // Export chat to JSON or CSV
@@ -926,6 +1002,10 @@
         }, 100);
       }
     </script>
+    <!-- Chat toggle button (fixed position, only visible when chat is collapsed) -->
+    <button id="chat-toggle-btn" class="chat-toggle-btn">
+      <i class="fas fa-comment-dots"></i>
+    </button>
   </body>
 </html>
 
