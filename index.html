@@ -33,6 +33,13 @@
             <i class="fas fa-file-csv"></i> Export as CSV
           </div>
         </div>
+        <!-- Data management section -->
+        <div class="menu-section">
+          <div class="menu-section-title">Data Management</div>
+          <div class="menu-option" id="delete-all-convs">
+            <i class="fas fa-trash-alt"></i> Delete All Conversations
+          </div>
+        </div>
         <!-- Window position section -->
         <div class="menu-section">
           <div class="menu-section-title">Window Position</div>
@@ -79,9 +86,25 @@
       <div class="chat-container left-sidebar">
         <!-- Sidebar for conversations -->
         <div class="sidebar">
-          <button id="new-chat-btn" class="new-chat-btn">
-            <i class="fas fa-plus"></i> New Chat
-          </button>
+          <div class="sidebar-buttons">
+            <button id="new-chat-btn" class="new-chat-btn">
+              <i class="fas fa-plus"></i> New Chat
+            </button>
+            <button id="select-mode-btn" class="select-mode-btn" title="Select Multiple Chats">
+              <i class="fas fa-check-square"></i>
+            </button>
+            <button id="clear-all-btn" class="clear-all-btn" title="Delete All Conversations">
+              <i class="fas fa-trash-alt"></i>
+            </button>
+          </div>
+          <div id="selection-actions" class="selection-actions" style="display: none;">
+            <button id="delete-selected-btn" class="delete-selected-btn">
+              <i class="fas fa-trash"></i> Delete Selected
+            </button>
+            <button id="cancel-selection-btn" class="cancel-selection-btn">
+              <i class="fas fa-times"></i> Cancel
+            </button>
+          </div>
           <div id="conversation-list" class="conversation-list">
             <!-- Conversations will be loaded here -->
           </div>
@@ -104,9 +127,9 @@
             </div>
             
             <!-- Message input form -->
-            <form id="message-form">
+            <form id="message-form" onsubmit="return false;">
               <textarea name="message" id="message" placeholder="Type your message... (Shift+Enter for new line)"></textarea>
-              <button type="submit">
+              <button type="button" id="send-button">
                 <i class="fas fa-paper-plane"></i>
               </button>
             </form>
@@ -145,9 +168,13 @@
       
       // Initialize the app
       document.addEventListener('DOMContentLoaded', () => {
+        // Set first load flag
+        const isFirstLoad = localStorage.getItem('hasLoadedBefore') !== 'true';
+        localStorage.setItem('hasLoadedBefore', 'true');
+        
         loadConversations().then(convCount => {
-          // Only create a new conversation if there are none
-          if (convCount === 0) {
+          // Only create a new conversation if there are none AND this is first load
+          if (convCount === 0 && isFirstLoad) {
             createNewConversation();
           }
         });
@@ -159,7 +186,25 @@
         // Set up event listeners
         newChatBtn.addEventListener('click', createNewConversation);
         fileInput.addEventListener('change', handleFileUpload);
-        messageForm.addEventListener('submit', handleSubmit);
+        
+        // Clear all conversations button
+        document.getElementById('clear-all-btn').addEventListener('click', () => {
+          if (confirm('Are you sure you want to delete ALL conversations? This cannot be undone.')) {
+            deleteAllConversations();
+          }
+        });
+        
+        // Selection mode button
+        document.getElementById('select-mode-btn').addEventListener('click', toggleSelectionMode);
+        
+        // Delete selected button
+        document.getElementById('delete-selected-btn').addEventListener('click', deleteSelectedConversations);
+        
+        // Cancel selection button
+        document.getElementById('cancel-selection-btn').addEventListener('click', toggleSelectionMode);
+        
+        // Use the button click instead of form submit
+        document.getElementById('send-button').addEventListener('click', handleSubmit);
         
         // Set up auto-grow textarea
         messageInput.addEventListener('input', autoResizeTextarea);
@@ -175,23 +220,63 @@
         // Check if collapsed state is saved in localStorage
         const isCollapsed = localStorage.getItem('chatCollapsed') === 'true';
         if (isCollapsed) {
+          // Position at toggle button
+          const mainRect = {
+            right: window.innerWidth - 60,
+            bottom: window.innerHeight - 60  
+          };
+          
+          // Set collapsed position
+          mainElement.style.transform = `translate(${mainRect.right}px, ${mainRect.bottom}px) scale(0.1)`;
+          
+          // Add collapsed classes
           mainElement.classList.add('collapsed');
           document.body.classList.add('chat-hidden');
         }
         
         // Collapse button (inside chat window)
         collapseBtn.addEventListener('click', () => {
-          mainElement.classList.toggle('collapsed');
-          document.body.classList.toggle('chat-hidden');
+          // Get toggle button position to animate towards
+          const toggleRect = chatToggleBtn.getBoundingClientRect();
+          const mainRect = {
+            right: window.innerWidth - 60,
+            bottom: window.innerHeight - 60  
+          };
           
-          // Save collapsed state to localStorage
-          localStorage.setItem('chatCollapsed', mainElement.classList.contains('collapsed'));
+          // Start animation to collapsed state
+          mainElement.style.transform = `translate(${mainRect.right}px, ${mainRect.bottom}px) scale(0.1)`;
+          
+          // Add the collapsed class after animation starts
+          setTimeout(() => {
+            mainElement.classList.add('collapsed');
+            document.body.classList.add('chat-hidden');
+            
+            // Save collapsed state to localStorage
+            localStorage.setItem('chatCollapsed', 'true');
+          }, 300);
         });
         
         // Chat toggle button (floating action button when collapsed)
         chatToggleBtn.addEventListener('click', () => {
+          // Get toggle button position for animation start point
+          const toggleRect = chatToggleBtn.getBoundingClientRect();
+          const mainRect = {
+            right: window.innerWidth - 60,
+            bottom: window.innerHeight - 60  
+          };
+          
+          // Set initial position to animate from
+          mainElement.style.transform = `translate(${mainRect.right}px, ${mainRect.bottom}px) scale(0.1)`;
+          
+          // Remove collapsed class
           mainElement.classList.remove('collapsed');
           document.body.classList.remove('chat-hidden');
+          
+          // Force layout calculation
+          mainElement.offsetHeight;
+          
+          // Animate to full size
+          mainElement.style.transform = 'translate(0, 0) scale(1)';
           
           // Save collapsed state to localStorage
           localStorage.setItem('chatCollapsed', 'false');
@@ -224,6 +309,14 @@
         
         document.getElementById('export-csv').addEventListener('click', () => {
           exportChat('csv');
+          menuDropdown.classList.remove('active');
+        });
+        
+        // Delete all conversations handler
+        document.getElementById('delete-all-convs').addEventListener('click', () => {
+          if (confirm('Are you sure you want to delete ALL conversations? This cannot be undone.')) {
+            deleteAllConversations();
+          }
           menuDropdown.classList.remove('active');
         });
       }
@@ -365,10 +458,10 @@
       
       // Handle keydown events in the message input
       function handleMessageKeyDown(e) {
-        // If Enter key is pressed without Shift, submit the form
+        // If Enter key is pressed without Shift, trigger the send button click
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
-          messageForm.dispatchEvent(new Event('submit'));
+          document.getElementById('send-button').click();
         }
       }
       
@@ -518,12 +611,26 @@
           // Display all messages
           if (data.messages && data.messages.length > 0) {
             messages = data.messages;
-            console.log(`Rendering ${messages.length} messages`);
             
-            // Render messages with a small delay between each to allow DOM updates
-            for (const msg of messages) {
-              appendMessageToUI(msg);
-              await new Promise(resolve => setTimeout(resolve, 10));
+            // Group messages by exchange (user+assistant pairs)
+            let i = 0;
+            while (i < messages.length) {
+              const container = document.createElement('div');
+              container.className = 'message-container';
+              
+              // Add user message
+              if (messages[i].role === 'user') {
+                container.appendChild(createMessageElement(messages[i]));
+                i++;
+              }
+              
+              // Add assistant response if available
+              if (i < messages.length && messages[i].role === 'assistant') {
+                container.appendChild(createMessageElement(messages[i]));
+                i++;
+              }
+              
+              chatLog.appendChild(container);
             }
             
             chatLog.scrollTop = chatLog.scrollHeight;
@@ -534,6 +641,10 @@
           console.error(`Failed to load conversation ${conversationId}:`, error);
         }
       }
+      
+      // Globals for selection mode
+      let isSelectionMode = false;
+      let selectedConversations = [];
       
       // Render the conversation list in the sidebar
       function renderConversationList() {
@@ -546,6 +657,14 @@
           
           if (conversation.id === currentConversationId) {
             conversationEl.classList.add('active');
+          }
+          
+          // Add selection classes if in selection mode
+          if (isSelectionMode) {
+            conversationEl.classList.add('selectable');
+            if (selectedConversations.includes(conversation.id)) {
+              conversationEl.classList.add('selected');
+            }
           }
           
           // Format the date to show only the date part if not today
@@ -582,27 +701,57 @@
           
           // Append elements
           conversationEl.appendChild(contentEl);
-          conversationEl.appendChild(actionsEl);
+          
+          // Only show action buttons if not in selection mode
+          if (!isSelectionMode) {
+            conversationEl.appendChild(actionsEl);
+          }
           
           // Add event listeners
-          contentEl.addEventListener('click', () => loadConversation(conversation.id));
-          
-          // Rename button
-          const renameBtn = actionsEl.querySelector('.rename-btn');
-          renameBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openRenameModal(conversation);
-          });
-          
-          // Delete button
-          const deleteBtn = actionsEl.querySelector('.delete-btn');
-          deleteBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            deleteConversation(conversation.id);
-          });
+          if (isSelectionMode) {
+            // In selection mode, clicking toggles selection
+            conversationEl.addEventListener('click', () => {
+              toggleConversationSelection(conversation.id, conversationEl);
+            });
+          } else {
+            // Normal mode - load conversation
+            contentEl.addEventListener('click', () => loadConversation(conversation.id));
+            
+            // Rename button
+            const renameBtn = actionsEl.querySelector('.rename-btn');
+            renameBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              openRenameModal(conversation);
+            });
+            
+            // Delete button
+            const deleteBtn = actionsEl.querySelector('.delete-btn');
+            deleteBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              deleteConversation(conversation.id);
+            });
+          }
           
           conversationList.appendChild(conversationEl);
         });
+      }
+      
+      // Toggle selection of a conversation
+      function toggleConversationSelection(conversationId, element) {
+        const index = selectedConversations.indexOf(conversationId);
+        
+        if (index === -1) {
+          // Add to selection
+          selectedConversations.push(conversationId);
+          element.classList.add('selected');
+        } else {
+          // Remove from selection
+          selectedConversations.splice(index, 1);
+          element.classList.remove('selected');
+        }
+        
+        // Update button state
+        document.getElementById('delete-selected-btn').disabled = selectedConversations.length === 0;
       }
       
       // Open rename modal
@@ -691,17 +840,130 @@
             // Remove from local state
             conversations = conversations.filter(c => c.id !== conversationId);
             
-            // If deleted conversation was active, create a new one
+            // If deleted conversation was active, load another one if available
             if (currentConversationId === conversationId) {
-              createNewConversation();
-            } else {
-              renderConversationList();
+              if (conversations.length > 0) {
+                loadConversation(conversations[0].id);
+              } else {
+                // No conversations left, clear the UI
+                chatLog.innerHTML = '';
+                messages = [];
+                currentConversationId = null;
+              }
             }
+            
+            renderConversationList();
           } else {
             console.error('Failed to delete conversation');
           }
         } catch (error) {
           console.error('Error deleting conversation:', error);
+        }
+      }
+      
+      // Toggle selection mode
+      function toggleSelectionMode() {
+        isSelectionMode = !isSelectionMode;
+        
+        // Toggle selection mode button active state
+        document.getElementById('select-mode-btn').classList.toggle('active', isSelectionMode);
+        
+        // Show/hide selection actions
+        document.getElementById('selection-actions').style.display = isSelectionMode ? 'flex' : 'none';
+        
+        // Clear selections when exiting selection mode
+        if (!isSelectionMode) {
+          selectedConversations = [];
+        }
+        
+        // Disable delete selected button initially
+        if (isSelectionMode) {
+          document.getElementById('delete-selected-btn').disabled = true;
+        }
+        
+        // Re-render conversation list to update appearance
+        renderConversationList();
+      }
+      
+      // Delete selected conversations
+      async function deleteSelectedConversations() {
+        if (selectedConversations.length === 0) return;
+        
+        if (confirm(`Are you sure you want to delete ${selectedConversations.length} selected conversation(s)? This cannot be undone.`)) {
+          try {
+            // Delete each selected conversation
+            for (const id of selectedConversations) {
+              try {
+                await fetch(`/api/conversations/${id}`, {
+                  method: 'DELETE'
+                });
+                
+                // Remove from local state
+                conversations = conversations.filter(c => c.id !== id);
+                
+                // If current conversation is deleted, reset view
+                if (currentConversationId === id) {
+                  chatLog.innerHTML = '';
+                  messages = [];
+                  currentConversationId = null;
+                }
+              } catch (err) {
+                console.error(`Error deleting conversation ${id}:`, err);
+              }
+            }
+            
+            // Load another conversation if available and needed
+            if (currentConversationId === null && conversations.length > 0) {
+              loadConversation(conversations[0].id);
+            }
+            
+            // Exit selection mode
+            toggleSelectionMode();
+            
+            // Notify user
+            alert(`${selectedConversations.length} conversation(s) deleted successfully.`);
+          } catch (error) {
+            console.error('Error deleting conversations:', error);
+            alert('There was an error deleting conversations. Please try again.');
+          }
+        }
+      }
+      
+      // Delete all conversations
+      async function deleteAllConversations() {
+        try {
+          // Get all conversation IDs
+          const ids = conversations.map(c => c.id);
+          
+          // Delete each conversation
+          for (const id of ids) {
+            try {
+              await fetch(`/api/conversations/${id}`, {
+                method: 'DELETE'
+              });
+            } catch (err) {
+              console.error(`Error deleting conversation ${id}:`, err);
+            }
+          }
+          
+          // Clear local state
+          conversations = [];
+          currentConversationId = null;
+          messages = [];
+          
+          // Clear UI
+          chatLog.innerHTML = '';
+          renderConversationList();
+          
+          // Exit selection mode if active
+          if (isSelectionMode) {
+            toggleSelectionMode();
+          }
+          
+          alert('All conversations have been deleted.');
+        } catch (error) {
+          console.error('Error deleting all conversations:', error);
+          alert('There was an error deleting conversations. Please try again.');
         }
       }
       
@@ -730,6 +992,9 @@
             currentUploadedFile = data.file;
             
             // Show the uploaded file in chat
+            const container = document.createElement('div');
+            container.className = 'message-container';
+            
             const fileElement = document.createElement('div');
             fileElement.classList.add('message', 'message--sent');
             fileElement.innerHTML = `
@@ -742,7 +1007,9 @@
                 </div>
               </div>
             `;
-            chatLog.appendChild(fileElement);
+            
+            container.appendChild(fileElement);
+            chatLog.appendChild(container);
             chatLog.scrollTop = chatLog.scrollHeight;
           } else {
             fileName.textContent = 'Upload failed. Try again.';
@@ -757,72 +1024,82 @@
       // Handle message submission
       async function handleSubmit(e) {
         e.preventDefault();
-        console.log("Form submitted");
         
         const messageText = messageInput.value.trim();
         if (!messageText && !currentUploadedFile) {
-          console.log("No message to send");
           return;
         }
         
         // Clear the input
         messageInput.value = '';
-        
-        // Reset textarea height
         messageInput.style.height = '';
-        
-        // Create user message object
-        const userMessage = { 
-          role: "user", 
-          content: messageText 
-        };
-        
-        console.log("User message created:", userMessage);
         
         // If the chat is collapsed, expand it
         const mainElement = document.querySelector('main');
+        const chatToggleBtn = document.getElementById('chat-toggle-btn');
+        
         if (mainElement.classList.contains('collapsed') || document.body.classList.contains('chat-hidden')) {
-          console.log("Expanding collapsed chat");
+          // Get toggle button position for animation start point
+          const toggleRect = chatToggleBtn.getBoundingClientRect();
+          const mainRect = {
+            right: window.innerWidth - 60,
+            bottom: window.innerHeight - 60  
+          };
+          
+          // Set initial position to animate from
+          mainElement.style.transform = `translate(${mainRect.right}px, ${mainRect.bottom}px) scale(0.1)`;
+          
+          // Remove collapsed class
           mainElement.classList.remove('collapsed');
           document.body.classList.remove('chat-hidden');
           localStorage.setItem('chatCollapsed', 'false');
           
-          // Give the DOM time to update before continuing
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        
-        // If we are sending a message, add it to the UI
-        if (messageText) {
-          console.log("Adding user message to UI:", messageText);
+          // Force layout calculation
+          mainElement.offsetHeight;
           
-          try {
-            // Add user message to UI first
-            appendMessageToUI(userMessage);
-            messages.push(userMessage);
-            
-            // Ensure chat log is visible and scrolled
-            chatLog.style.display = 'block';
-            chatLog.scrollTop = chatLog.scrollHeight;
-            console.log("Chat state:", {
-              messageCount: messages.length,
-              chatLogChildren: chatLog.children.length,
-              chatLogHeight: chatLog.scrollHeight,
-              mainVisible: !document.querySelector('main').classList.contains('collapsed')
-            });
-          } catch (error) {
-            console.error("Error adding user message:", error);
-          }
+          // Animate to full size
+          mainElement.style.transform = 'translate(0, 0) scale(1)';
+          
+          // Give the DOM time to update before continuing
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
         
-        // Show typing indicator
+        // Create a temporary container for the entire message exchange
+        const messageContainer = document.createElement('div');
+        messageContainer.className = 'message-container';
+        
+        if (messageText) {
+          // Create user message object
+          const userMessage = { 
+            role: "user", 
+            content: messageText 
+          };
+          
+          // Create the user message element
+          const userElement = createMessageElement(userMessage);
+          messageContainer.appendChild(userElement);
+          
+          // Add to messages array
+          messages.push(userMessage);
+        }
+        
+        // Add typing indicator in the same container
         const typingIndicator = document.createElement('div');
         typingIndicator.classList.add('typing-indicator');
         typingIndicator.innerHTML = `
-          <span></span>
-          <span></span>
-          <span></span>
+          <div class="message__avatar">
+            <i class="fas fa-robot"></i>
+          </div>
+          <div class="typing-bubbles">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
         `;
-        chatLog.appendChild(typingIndicator);
+        messageContainer.appendChild(typingIndicator);
+        
+        // Add the entire container to the chat log
+        chatLog.appendChild(messageContainer);
         chatLog.scrollTop = chatLog.scrollHeight;
         
         // Prepare request data
@@ -861,14 +1138,15 @@
           }
           
           // Remove typing indicator
-          if (chatLog.contains(typingIndicator)) {
-            chatLog.removeChild(typingIndicator);
-          }
+          messageContainer.removeChild(typingIndicator);
           
           // Add assistant response to messages and UI
           const assistantMessage = data.completion;
           messages.push(assistantMessage);
-          appendMessageToUI(assistantMessage);
+          
+          // Create and add the assistant message element to the same container
+          const assistantElement = createMessageElement(assistantMessage);
+          messageContainer.appendChild(assistantElement);
           
           // Scroll to bottom
           chatLog.scrollTop = chatLog.scrollHeight;
@@ -887,12 +1165,10 @@
         } catch (error) {
           console.error('Error sending message:', error);
           
-          // Remove typing indicator if it still exists
-          if (chatLog.contains(typingIndicator)) {
-            chatLog.removeChild(typingIndicator);
-          }
+          // Remove typing indicator
+          messageContainer.removeChild(typingIndicator);
           
-          // Show error message
+          // Create error message
           const errorElement = document.createElement('div');
           errorElement.classList.add('message', 'message--received', 'error');
           errorElement.innerHTML = `
@@ -903,15 +1179,15 @@
               Sorry, there was an error processing your request: ${error.message || 'Unknown error'}. Please try again.
             </div>
           `;
-          chatLog.appendChild(errorElement);
+          
+          // Add error to the same container
+          messageContainer.appendChild(errorElement);
           chatLog.scrollTop = chatLog.scrollHeight;
         }
       }
       
-      // Add a message to the UI
-      function appendMessageToUI(message) {
-        console.log("Appending message to UI:", message); // Debug logging
-        
+      // Create a message element but don't append it to the DOM
+      function createMessageElement(message) {
         const messageElement = document.createElement('div');
         messageElement.classList.add('message');
         
@@ -925,31 +1201,32 @@
           avatarIcon = 'fa-robot'; // Robot icon for Ralph
         }
         
-        try {
-          // Convert line breaks to <br> and render markdown-like code blocks
-          let formattedContent = '';
-          if (message.content) {
-            formattedContent = message.content
-              .replace(/\n/g, '<br>')
-              .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
-          } else {
-            console.error("Message content is undefined:", message);
-            formattedContent = "(Error: Empty message)";
-          }
-          
-          // Add avatar and message content
-          messageElement.innerHTML = `
-            <div class="message__avatar">
-              <i class="fas ${avatarIcon}"></i>
-            </div>
-            <div class="message__text">${formattedContent}</div>
-          `;
-          
-          chatLog.appendChild(messageElement);
-          console.log("Message added to chat log"); // Debug logging
-        } catch (error) {
-          console.error("Error adding message to UI:", error);
+        // Convert line breaks to <br> and render markdown-like code blocks
+        let formattedContent = '';
+        if (message.content) {
+          formattedContent = message.content
+            .replace(/\n/g, '<br>')
+            .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+        } else {
+          formattedContent = "(Error: Empty message)";
         }
+        
+        // Set inner HTML with avatar and message content
+        messageElement.innerHTML = `
+          <div class="message__avatar">
+            <i class="fas ${avatarIcon}"></i>
+          </div>
+          <div class="message__text">${formattedContent}</div>
+        `;
+        
+        return messageElement;
+      }
+      
+      // Legacy method for backward compatibility
+      function appendMessageToUI(message) {
+        const element = createMessageElement(message);
+        chatLog.appendChild(element);
+        return element;
       }
       
       // Export chat to JSON or CSV

@@ -132,6 +132,25 @@ The chatbot supports uploading the following file types for analysis:
 - AI: OpenAI GPT-4 API
 - File Storage: Local file system
 - Chat History: JSON files stored in the `data` directory
+- Testing: Jest with jsdom for automated testing
+
+## Running Tests
+
+To run the automated tests:
+
+```bash
+# Install dependencies if not already done
+npm install
+
+# Run all tests
+npm test
+```
+
+This will run the complete test suite, which includes tests for:
+- UI Components
+- Message Handling
+- Conversation Management
+- Collapse Animation
 
 ## Directory Structure
 

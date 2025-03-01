@@ -27,13 +27,16 @@ main {
   resize: both;
   min-width: 400px;
   min-height: 400px;
-  transition: all 0.3s ease;
+  transition: all 0.3s ease, transform 0.5s ease;
+  transform-origin: bottom right;
 }
 
 /* Collapsed state */
 main.collapsed {
   height: 0 !important;
   min-height: 0;
+  width: 0 !important;
+  min-width: 0;
   overflow: hidden;
   opacity: 0;
   visibility: hidden;
@@ -41,6 +44,8 @@ main.collapsed {
   padding: 0;
   border: none;
   box-shadow: none;
+  transform: translate(calc(100vw - 60px), calc(100vh - 60px));
+  transition: all 0.3s ease, transform 0.5s ease;
 }
 
 /* Chat toggle button - only visible when chat is collapsed */
@@ -203,8 +208,14 @@ h1 {
   text-overflow: ellipsis;
 }
 
-.new-chat-btn {
+.sidebar-buttons {
+  display: flex;
   margin-bottom: 15px;
+  gap: 8px;
+}
+
+.new-chat-btn {
+  flex: 1;
   background-color: #4285f4;
   color: white;
   border: none;
@@ -213,10 +224,130 @@ h1 {
   cursor: pointer;
   font-weight: bold;
   transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .new-chat-btn:hover {
   background-color: #3367d6;
+}
+
+.select-mode-btn {
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  padding: 10px;
+  width: 42px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.select-mode-btn:hover {
+  background-color: #388E3C;
+}
+
+.select-mode-btn.active {
+  background-color: #388E3C;
+}
+
+.clear-all-btn {
+  background-color: #f44336;
+  color: white;
+  border: none;
+  padding: 10px;
+  width: 42px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clear-all-btn:hover {
+  background-color: #d32f2f;
+}
+
+/* Selection mode styles */
+.selection-actions {
+  display: flex;
+  margin-bottom: 15px;
+  gap: 8px;
+}
+
+.delete-selected-btn {
+  flex: 1;
+  background-color: #f44336;
+  color: white;
+  border: none;
+  padding: 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.delete-selected-btn:hover {
+  background-color: #d32f2f;
+}
+
+.cancel-selection-btn {
+  background-color: #9E9E9E;
+  color: white;
+  border: none;
+  padding: 10px;
+  width: 42px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cancel-selection-btn:hover {
+  background-color: #757575;
+}
+
+.conversation.selectable {
+  padding-left: 35px;
+  position: relative;
+}
+
+.conversation.selectable::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border: 2px solid #ccc;
+  border-radius: 4px;
+  background-color: white;
+}
+
+.conversation.selected::before {
+  background-color: #4CAF50;
+  border-color: #4CAF50;
+  content: "✓";
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
 }
 
 .main-chat {
@@ -236,26 +367,30 @@ h1 {
   min-height: 200px; /* Ensure chat log always has some height */
 }
 
+.message-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 20px;
+  z-index: 1; /* Ensure containers are above other elements */
+}
+
 .message {
-  margin-bottom: 15px;
   max-width: 80%;
-  clear: both;
   display: flex;
   align-items: flex-start;
   position: relative;
-  z-index: 1; /* Ensure messages are above other elements */
+  margin-bottom: 2px;
 }
 
 .message--sent {
-  float: right;
   flex-direction: row-reverse;
-  margin-left: auto; /* Push to the right */
+  align-self: flex-end; /* Align to the right */
   margin-right: 10px;
 }
 
 .message--received {
-  float: left;
-  margin-right: auto; /* Push to the left */
+  align-self: flex-start; /* Align to the left */
   margin-left: 10px;
 }
 
@@ -382,15 +517,24 @@ button:hover {
 }
 
 /* Loading indicator */
+/* Message container styles are now defined above */
+
 .typing-indicator {
   display: flex;
+  align-items: flex-start;
+  margin-bottom: 15px;
+  max-width: 80%;
+  float: left;
+  margin-left: 10px;
+}
+
+.typing-bubbles {
   padding: 12px 16px;
   background-color: #f1f1f1;
   border-radius: 18px;
-  margin-bottom: 15px;
-  width: fit-content;
-  float: left;
-  clear: both;
+  border-top-left-radius: 4px;
+  display: flex;
+  align-items: center;
 }
 
 .typing-indicator span {
