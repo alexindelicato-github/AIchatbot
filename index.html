@@ -4,66 +4,928 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <title>AI Chatbot</title>
+    <title>AI Security Chatbot</title>
     <link rel="stylesheet" href="./style.css">
     <link rel="icon" href="./favicon.ico" type="image/x-icon">
+    <!-- Add Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   </head>
   <body>
-    <main>
-        <h1>AI Chatbot</h1>  
-        <form action="">
-            <input type="text" name="message" id="message">
-            <button type="submit">Send</button>
-        </form>
-        <div id="chat-log"> 
-
+    <!-- Chat toggle button (only visible when chat is collapsed) -->
+    <button id="chat-toggle-btn" class="chat-toggle-btn">
+      <i class="fas fa-comment-dots"></i>
+    </button>
+    
+    <main class="center-dock">
+      <!-- Collapse button -->
+      <button id="collapse-btn" class="collapse-btn">
+        <i class="fas fa-minus"></i>
+      </button>
+      
+      <h1>AI Security Chatbot</h1>
+      <!-- Menu button and dropdown -->
+      <button id="menu-btn" class="menu-btn">
+        <i class="fas fa-ellipsis-v"></i>
+      </button>
+      <div id="menu-dropdown" class="menu-dropdown">
+        <!-- Export options section -->
+        <div class="menu-section">
+          <div class="menu-section-title">Export</div>
+          <div class="menu-option" id="export-json">
+            <i class="fas fa-file-code"></i> Export as JSON
+          </div>
+          <div class="menu-option" id="export-csv">
+            <i class="fas fa-file-csv"></i> Export as CSV
+          </div>
         </div>
+        <!-- Window position section -->
+        <div class="menu-section">
+          <div class="menu-section-title">Window Position</div>
+          <div class="menu-option" id="left-dock-btn">
+            <i class="fas fa-arrow-left"></i> Dock to Left
+          </div>
+          <div class="menu-option active" id="center-dock-btn">
+            <i class="fas fa-arrows-alt-h"></i> Center
+          </div>
+          <div class="menu-option" id="right-dock-btn">
+            <i class="fas fa-arrow-right"></i> Dock to Right
+          </div>
+        </div>
+        <!-- Sidebar position section -->
+        <div class="menu-section">
+          <div class="menu-section-title">Sidebar Position</div>
+          <div class="menu-option active" id="left-sidebar-btn">
+            <i class="fas fa-align-left"></i> Left Sidebar
+          </div>
+          <div class="menu-option" id="right-sidebar-btn">
+            <i class="fas fa-align-right"></i> Right Sidebar
+          </div>
+        </div>
+      </div>
+      
+      <!-- Resize handles for manual resizing -->
+      <div class="resize-handle resize-handle-e" id="resize-e"></div>
+      <div class="resize-handle resize-handle-s" id="resize-s"></div>
+      <div class="resize-handle resize-handle-se" id="resize-se"></div>
+      <div class="resize-handle resize-handle-w" id="resize-w"></div>
+      
+      <!-- Rename conversation modal -->
+      <div id="rename-modal" class="modal-overlay">
+        <div class="modal-content">
+          <h3 class="modal-title">Rename Conversation</h3>
+          <input type="text" id="rename-input" class="modal-input" placeholder="Enter new name">
+          <div class="modal-actions">
+            <button id="rename-cancel" class="modal-btn modal-btn-cancel">Cancel</button>
+            <button id="rename-confirm" class="modal-btn modal-btn-confirm">Rename</button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="chat-container left-sidebar">
+        <!-- Sidebar for conversations -->
+        <div class="sidebar">
+          <button id="new-chat-btn" class="new-chat-btn">
+            <i class="fas fa-plus"></i> New Chat
+          </button>
+          <div id="conversation-list" class="conversation-list">
+            <!-- Conversations will be loaded here -->
+          </div>
+        </div>
+
+        <!-- Main chat area -->
+        <div class="main-chat">
+          <div id="chat-log">
+            <!-- Messages will appear here -->
+          </div>
+          
+          <div class="input-container">
+            <!-- File upload -->
+            <div class="file-container">
+              <label for="file-input" class="file-input-label">
+                <i class="fas fa-paperclip"></i>
+                <span class="file-name" id="file-name">Attach a file</span>
+              </label>
+              <input type="file" id="file-input" accept=".txt,.js,.html,.css,.json,.py,.cpp,.h,.c,.md,.xml,.yaml,.yml,.sql,.log">
+            </div>
+            
+            <!-- Message input form -->
+            <form id="message-form">
+              <textarea name="message" id="message" placeholder="Type your message... (Shift+Enter for new line)"></textarea>
+              <button type="submit">
+                <i class="fas fa-paper-plane"></i>
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
     </main>
-	<script>
-        let messages = []
-        const chatLog = document.getElementById('chat-log');
-        const message = document.getElementById('message');
-        const form = document.querySelector('form');
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const messageText = message.value;
-            const newMessage = {"role": "user", "content": `${messageText}`}
-            messages.push(newMessage)
-            message.value = '';
-            const messageElement = document.createElement('div');
-            messageElement.classList.add('message');
-            messageElement.classList.add('message--sent');
-            messageElement.innerHTML = `
-                <div class="message__text">${messageText}</div>
+
+    <script>
+      // State variables
+      let messages = [];
+      let conversations = [];
+      let currentConversationId = null;
+      let currentUploadedFile = null;
+      
+      // DOM elements
+      const chatLog = document.getElementById('chat-log');
+      const messageInput = document.getElementById('message');
+      const messageForm = document.getElementById('message-form');
+      const fileInput = document.getElementById('file-input');
+      const fileName = document.getElementById('file-name');
+      const conversationList = document.getElementById('conversation-list');
+      const newChatBtn = document.getElementById('new-chat-btn');
+      // Menu button is referenced directly in setupMenuControls
+      // These constants are now obtained directly in the setupMenuControls function
+      
+      // Main elements
+      const chatContainer = document.querySelector('.chat-container');
+      const mainElement = document.querySelector('main');
+      
+      // Resize handles
+      const resizeHandleE = document.getElementById('resize-e');
+      const resizeHandleS = document.getElementById('resize-s');
+      const resizeHandleSE = document.getElementById('resize-se');
+      const resizeHandleW = document.getElementById('resize-w');
+      
+      // Initialize the app
+      document.addEventListener('DOMContentLoaded', () => {
+        loadConversations();
+        createNewConversation();
+        setupLayoutControls();
+        setupMenuControls();
+        setupCollapseControls();
+        
+        // Set up event listeners
+        newChatBtn.addEventListener('click', createNewConversation);
+        fileInput.addEventListener('change', handleFileUpload);
+        messageForm.addEventListener('submit', handleSubmit);
+        
+        // Set up auto-grow textarea
+        messageInput.addEventListener('input', autoResizeTextarea);
+        messageInput.addEventListener('keydown', handleMessageKeyDown);
+      });
+      
+      // Setup collapse functionality
+      function setupCollapseControls() {
+        const collapseBtn = document.getElementById('collapse-btn');
+        const chatToggleBtn = document.getElementById('chat-toggle-btn');
+        const mainElement = document.querySelector('main');
+        
+        // Check if collapsed state is saved in localStorage
+        const isCollapsed = localStorage.getItem('chatCollapsed') === 'true';
+        if (isCollapsed) {
+          mainElement.classList.add('collapsed');
+          document.body.classList.add('chat-hidden');
+        }
+        
+        // Collapse button (inside chat window)
+        collapseBtn.addEventListener('click', () => {
+          mainElement.classList.toggle('collapsed');
+          document.body.classList.toggle('chat-hidden');
+          
+          // Save collapsed state to localStorage
+          localStorage.setItem('chatCollapsed', mainElement.classList.contains('collapsed'));
+        });
+        
+        // Chat toggle button (floating action button when collapsed)
+        chatToggleBtn.addEventListener('click', () => {
+          mainElement.classList.remove('collapsed');
+          document.body.classList.remove('chat-hidden');
+          
+          // Save collapsed state to localStorage
+          localStorage.setItem('chatCollapsed', 'false');
+        });
+      }
+      
+      // Setup menu dropdown and options
+      function setupMenuControls() {
+        const menuBtn = document.getElementById('menu-btn');
+        const menuDropdown = document.getElementById('menu-dropdown');
+        
+        // Menu button toggle
+        menuBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          menuDropdown.classList.toggle('active');
+        });
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+          if (!menuBtn.contains(e.target) && !menuDropdown.contains(e.target)) {
+            menuDropdown.classList.remove('active');
+          }
+        });
+        
+        // Export handlers
+        document.getElementById('export-json').addEventListener('click', () => {
+          exportChat('json');
+          menuDropdown.classList.remove('active');
+        });
+        
+        document.getElementById('export-csv').addEventListener('click', () => {
+          exportChat('csv');
+          menuDropdown.classList.remove('active');
+        });
+      }
+      
+      // Setup layout control functionality
+      function setupLayoutControls() {
+        // Window dock position controls (left, center, right of browser)
+        document.getElementById('left-dock-btn').addEventListener('click', () => {
+          mainElement.classList.remove('center-dock', 'right-dock');
+          mainElement.classList.add('left-dock');
+          updateActiveLayoutButton('dock', 'left-dock-btn');
+          saveLayoutPreferences('dock', 'left');
+        });
+        
+        document.getElementById('center-dock-btn').addEventListener('click', () => {
+          mainElement.classList.remove('left-dock', 'right-dock');
+          mainElement.classList.add('center-dock');
+          updateActiveLayoutButton('dock', 'center-dock-btn');
+          saveLayoutPreferences('dock', 'center');
+        });
+        
+        document.getElementById('right-dock-btn').addEventListener('click', () => {
+          mainElement.classList.remove('left-dock', 'center-dock');
+          mainElement.classList.add('right-dock');
+          updateActiveLayoutButton('dock', 'right-dock-btn');
+          saveLayoutPreferences('dock', 'right');
+        });
+        
+        // Sidebar position controls (left or right within chat window)
+        document.getElementById('left-sidebar-btn').addEventListener('click', () => {
+          chatContainer.classList.remove('right-sidebar');
+          chatContainer.classList.add('left-sidebar');
+          updateActiveLayoutButton('sidebar', 'left-sidebar-btn');
+          saveLayoutPreferences('sidebar', 'left');
+        });
+        
+        document.getElementById('right-sidebar-btn').addEventListener('click', () => {
+          chatContainer.classList.remove('left-sidebar');
+          chatContainer.classList.add('right-sidebar');
+          updateActiveLayoutButton('sidebar', 'right-sidebar-btn');
+          saveLayoutPreferences('sidebar', 'right');
+        });
+        
+        // Setup manual resize handlers
+        setupResizeHandlers();
+        
+        // Load saved preferences
+        loadLayoutPreferences();
+      }
+      
+      // Setup resize handlers for manual resizing
+      function setupResizeHandlers() {
+        let isResizing = false;
+        let currentResizeHandle = null;
+        let startX, startY, startWidth, startHeight;
+        
+        // Functions for the resize operations
+        const startResize = (e, handle) => {
+          isResizing = true;
+          currentResizeHandle = handle;
+          startX = e.clientX;
+          startY = e.clientY;
+          startWidth = mainElement.offsetWidth;
+          startHeight = mainElement.offsetHeight;
+          
+          // Add event listeners for mouse movement and release
+          document.addEventListener('mousemove', handleResize);
+          document.addEventListener('mouseup', stopResize);
+          
+          // Prevent default browser behavior
+          e.preventDefault();
+        };
+        
+        const handleResize = (e) => {
+          if (!isResizing) return;
+          
+          let newWidth = startWidth;
+          let newHeight = startHeight;
+          
+          // Calculate new dimensions based on which handle is being dragged
+          switch (currentResizeHandle) {
+            case 'e': // East (right)
+              newWidth = startWidth + (e.clientX - startX);
+              break;
+            case 'w': // West (left)
+              newWidth = startWidth - (e.clientX - startX);
+              break;
+            case 's': // South (bottom)
+              newHeight = startHeight + (e.clientY - startY);
+              break;
+            case 'se': // Southeast (bottom-right)
+              newWidth = startWidth + (e.clientX - startX);
+              newHeight = startHeight + (e.clientY - startY);
+              break;
+          }
+          
+          // Apply size constraints (min/max width/height)
+          newWidth = Math.max(400, Math.min(1600, newWidth));
+          newHeight = Math.max(400, Math.min(window.innerHeight - 40, newHeight));
+          
+          // Update element size
+          mainElement.style.width = `${newWidth}px`;
+          mainElement.style.height = `${newHeight}px`;
+          
+          // If resizing from left, adjust position to keep right side stable
+          if (currentResizeHandle === 'w') {
+            mainElement.style.marginRight = 'auto';
+          }
+        };
+        
+        const stopResize = () => {
+          isResizing = false;
+          document.removeEventListener('mousemove', handleResize);
+          document.removeEventListener('mouseup', stopResize);
+          
+          // Save new dimensions to preferences
+          saveLayoutPreferences('dimensions', {
+            width: mainElement.offsetWidth,
+            height: mainElement.offsetHeight
+          });
+        };
+        
+        // Attach event listeners to resize handles
+        resizeHandleE.addEventListener('mousedown', (e) => startResize(e, 'e'));
+        resizeHandleS.addEventListener('mousedown', (e) => startResize(e, 's'));
+        resizeHandleSE.addEventListener('mousedown', (e) => startResize(e, 'se'));
+        resizeHandleW.addEventListener('mousedown', (e) => startResize(e, 'w'));
+      }
+      
+      // Handle textarea auto-resize
+      function autoResizeTextarea() {
+        // Reset height to get the correct scrollHeight
+        messageInput.style.height = '';
+        
+        // Set the height based on the content
+        const newHeight = Math.min(120, Math.max(48, messageInput.scrollHeight));
+        messageInput.style.height = newHeight + 'px';
+      }
+      
+      // Handle keydown events in the message input
+      function handleMessageKeyDown(e) {
+        // If Enter key is pressed without Shift, submit the form
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          messageForm.dispatchEvent(new Event('submit'));
+        }
+      }
+      
+      // Update active buttons in layout controls
+      function updateActiveLayoutButton(type, activeId) {
+        // Get all options in the relevant section
+        let selector;
+        if (type === 'dock') {
+          selector = '#left-dock-btn, #center-dock-btn, #right-dock-btn';
+        } else if (type === 'sidebar') {
+          selector = '#left-sidebar-btn, #right-sidebar-btn';
+        }
+        
+        // Remove active class from all options in this section
+        document.querySelectorAll(selector).forEach(el => {
+          el.classList.remove('active');
+        });
+        
+        // Add active class to the selected option
+        document.getElementById(activeId).classList.add('active');
+      }
+      
+      // Save layout preferences to localStorage
+      function saveLayoutPreferences(type, value) {
+        try {
+          const preferences = JSON.parse(localStorage.getItem('chatLayout') || '{}');
+          preferences[type] = value;
+          localStorage.setItem('chatLayout', JSON.stringify(preferences));
+        } catch (error) {
+          console.error('Error saving layout preferences:', error);
+        }
+      }
+      
+      // Load layout preferences from localStorage
+      function loadLayoutPreferences() {
+        try {
+          const preferences = JSON.parse(localStorage.getItem('chatLayout') || '{}');
+          
+          // Apply dock preference (browser position)
+          if (preferences.dock === 'left') {
+            mainElement.classList.remove('center-dock', 'right-dock');
+            mainElement.classList.add('left-dock');
+            updateActiveLayoutButton('dock', 'left-dock-btn');
+          } else if (preferences.dock === 'right') {
+            mainElement.classList.remove('center-dock', 'left-dock');
+            mainElement.classList.add('right-dock');
+            updateActiveLayoutButton('dock', 'right-dock-btn');
+          } else {
+            // Default is center
+            mainElement.classList.remove('left-dock', 'right-dock');
+            mainElement.classList.add('center-dock');
+            updateActiveLayoutButton('dock', 'center-dock-btn');
+          }
+          
+          // Apply sidebar preference
+          if (preferences.sidebar === 'right') {
+            chatContainer.classList.remove('left-sidebar');
+            chatContainer.classList.add('right-sidebar');
+            updateActiveLayoutButton('sidebar', 'right-sidebar-btn');
+          } else {
+            // Default is left sidebar
+            chatContainer.classList.remove('right-sidebar');
+            chatContainer.classList.add('left-sidebar');
+            updateActiveLayoutButton('sidebar', 'left-sidebar-btn');
+          }
+          
+          // Apply saved dimensions
+          if (preferences.dimensions) {
+            mainElement.style.width = `${preferences.dimensions.width}px`;
+            mainElement.style.height = `${preferences.dimensions.height}px`;
+          }
+        } catch (error) {
+          console.error('Error loading layout preferences:', error);
+        }
+      }
+      
+      // Load all conversations
+      async function loadConversations() {
+        try {
+          const response = await fetch('/api/conversations');
+          conversations = await response.json();
+          renderConversationList();
+        } catch (error) {
+          console.error('Failed to load conversations:', error);
+        }
+      }
+      
+      // Create a new conversation
+      async function createNewConversation() {
+        try {
+          const response = await fetch('/api/conversations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: 'New Chat' })
+          });
+          
+          const newConversation = await response.json();
+          conversations.unshift(newConversation);
+          renderConversationList();
+          
+          // Switch to the new conversation
+          loadConversation(newConversation.id);
+        } catch (error) {
+          console.error('Failed to create new conversation:', error);
+        }
+      }
+      
+      // Load a specific conversation
+      async function loadConversation(conversationId) {
+        try {
+          currentConversationId = conversationId;
+          
+          // Clear chat UI
+          chatLog.innerHTML = '';
+          messages = [];
+          
+          // Add active class to current conversation
+          document.querySelectorAll('.conversation').forEach(el => {
+            el.classList.remove('active');
+          });
+          
+          const conversationEl = document.getElementById(`conversation-${conversationId}`);
+          if (conversationEl) {
+            conversationEl.classList.add('active');
+          }
+          
+          // Get conversation data
+          const response = await fetch(`/api/conversations/${conversationId}`);
+          const data = await response.json();
+          
+          // Display all messages
+          if (data.messages && data.messages.length > 0) {
+            messages = data.messages;
+            messages.forEach(msg => {
+              appendMessageToUI(msg);
+            });
+            chatLog.scrollTop = chatLog.scrollHeight;
+          }
+        } catch (error) {
+          console.error(`Failed to load conversation ${conversationId}:`, error);
+        }
+      }
+      
+      // Render the conversation list in the sidebar
+      function renderConversationList() {
+        conversationList.innerHTML = '';
+        
+        conversations.forEach(conversation => {
+          const conversationEl = document.createElement('div');
+          conversationEl.id = `conversation-${conversation.id}`;
+          conversationEl.classList.add('conversation');
+          
+          if (conversation.id === currentConversationId) {
+            conversationEl.classList.add('active');
+          }
+          
+          // Format the date to show only the date part if not today
+          const createdDate = new Date(conversation.createdAt);
+          const today = new Date();
+          let dateDisplay = '';
+          
+          if (createdDate.toDateString() === today.toDateString()) {
+            // If today, show the time
+            dateDisplay = createdDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          } else {
+            // Otherwise show the date
+            dateDisplay = createdDate.toLocaleDateString();
+          }
+          
+          // Create content and action elements
+          const contentEl = document.createElement('div');
+          contentEl.className = 'conversation-content';
+          contentEl.innerHTML = `
+            <div>${conversation.title}</div>
+            <div style="font-size: 0.8em; color: #777;">${dateDisplay}</div>
+          `;
+          
+          const actionsEl = document.createElement('div');
+          actionsEl.className = 'conversation-actions';
+          actionsEl.innerHTML = `
+            <button class="rename-btn" title="Rename">
+              <i class="fas fa-edit"></i>
+            </button>
+            <button class="delete-btn" title="Delete">
+              <i class="fas fa-trash"></i>
+            </button>
+          `;
+          
+          // Append elements
+          conversationEl.appendChild(contentEl);
+          conversationEl.appendChild(actionsEl);
+          
+          // Add event listeners
+          contentEl.addEventListener('click', () => loadConversation(conversation.id));
+          
+          // Rename button
+          const renameBtn = actionsEl.querySelector('.rename-btn');
+          renameBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openRenameModal(conversation);
+          });
+          
+          // Delete button
+          const deleteBtn = actionsEl.querySelector('.delete-btn');
+          deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteConversation(conversation.id);
+          });
+          
+          conversationList.appendChild(conversationEl);
+        });
+      }
+      
+      // Open rename modal
+      function openRenameModal(conversation) {
+        const modal = document.getElementById('rename-modal');
+        const input = document.getElementById('rename-input');
+        const cancelBtn = document.getElementById('rename-cancel');
+        const confirmBtn = document.getElementById('rename-confirm');
+        
+        // Set current conversation ID as a data attribute
+        modal.dataset.conversationId = conversation.id;
+        
+        // Set current value
+        input.value = conversation.title;
+        
+        // Show modal
+        modal.classList.add('active');
+        
+        // Focus input
+        setTimeout(() => input.focus(), 100);
+        
+        // Setup event listeners
+        cancelBtn.onclick = () => {
+          modal.classList.remove('active');
+        };
+        
+        confirmBtn.onclick = () => {
+          if (input.value.trim()) {
+            renameConversation(conversation.id, input.value.trim());
+            modal.classList.remove('active');
+          }
+        };
+        
+        // Close on Escape key
+        input.onkeydown = (e) => {
+          if (e.key === 'Escape') {
+            modal.classList.remove('active');
+          } else if (e.key === 'Enter') {
+            if (input.value.trim()) {
+              renameConversation(conversation.id, input.value.trim());
+              modal.classList.remove('active');
+            }
+          }
+        };
+      }
+      
+      // Rename conversation
+      async function renameConversation(conversationId, newTitle) {
+        try {
+          const response = await fetch(`/api/conversations/${conversationId}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ title: newTitle })
+          });
+          
+          if (response.ok) {
+            // Update local state
+            const conversation = conversations.find(c => c.id === conversationId);
+            if (conversation) {
+              conversation.title = newTitle;
+              conversation.updatedAt = new Date().toISOString();
+              renderConversationList();
+            }
+          } else {
+            console.error('Failed to rename conversation');
+          }
+        } catch (error) {
+          console.error('Error renaming conversation:', error);
+        }
+      }
+      
+      // Delete conversation
+      async function deleteConversation(conversationId) {
+        if (!confirm('Are you sure you want to delete this conversation? This action cannot be undone.')) {
+          return;
+        }
+        
+        try {
+          const response = await fetch(`/api/conversations/${conversationId}`, {
+            method: 'DELETE'
+          });
+          
+          if (response.ok) {
+            // Remove from local state
+            conversations = conversations.filter(c => c.id !== conversationId);
+            
+            // If deleted conversation was active, create a new one
+            if (currentConversationId === conversationId) {
+              createNewConversation();
+            } else {
+              renderConversationList();
+            }
+          } else {
+            console.error('Failed to delete conversation');
+          }
+        } catch (error) {
+          console.error('Error deleting conversation:', error);
+        }
+      }
+      
+      // Handle file upload
+      function handleFileUpload(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        fileName.textContent = file.name;
+        
+        // Upload the file
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        // Show loading state
+        fileName.textContent = `Uploading ${file.name}...`;
+        
+        fetch('/api/upload', {
+          method: 'POST',
+          body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            fileName.textContent = `${file.name} (Uploaded)`;
+            currentUploadedFile = data.file;
+            
+            // Show the uploaded file in chat
+            const fileElement = document.createElement('div');
+            fileElement.classList.add('message', 'message--sent');
+            fileElement.innerHTML = `
+              <div class="message__avatar">
+                <i class="fas fa-user"></i>
+              </div>
+              <div class="message__text">
+                <div class="uploaded-file">
+                  <i class="fas fa-file"></i> ${file.name}
+                </div>
+              </div>
             `;
-         chatLog.appendChild(messageElement);
-         chatLog.scrollTop = chatLog.scrollHeight;
-         fetch('http://localhost:5000', {
+            chatLog.appendChild(fileElement);
+            chatLog.scrollTop = chatLog.scrollHeight;
+          } else {
+            fileName.textContent = 'Upload failed. Try again.';
+          }
+        })
+        .catch(error => {
+          console.error('Error uploading file:', error);
+          fileName.textContent = 'Upload failed. Try again.';
+        });
+      }
+      
+      // Handle message submission
+      async function handleSubmit(e) {
+        e.preventDefault();
+        
+        const messageText = messageInput.value.trim();
+        if (!messageText && !currentUploadedFile) return;
+        
+        // Clear the input
+        messageInput.value = '';
+        
+        // Reset textarea height
+        messageInput.style.height = '';
+        
+        // Create user message object
+        const userMessage = { 
+          role: "user", 
+          content: messageText 
+        };
+        
+        // If the chat is collapsed, expand it
+        const mainElement = document.querySelector('main');
+        if (mainElement.classList.contains('collapsed')) {
+          mainElement.classList.remove('collapsed');
+          document.body.classList.remove('chat-hidden');
+          localStorage.setItem('chatCollapsed', 'false');
+        }
+        
+        // If we are sending a message, add it to the UI
+        if (messageText) {
+          // Add user message to UI
+          appendMessageToUI(userMessage);
+          messages.push(userMessage);
+        }
+        
+        // Show typing indicator
+        const typingIndicator = document.createElement('div');
+        typingIndicator.classList.add('typing-indicator');
+        typingIndicator.innerHTML = `
+          <span></span>
+          <span></span>
+          <span></span>
+        `;
+        chatLog.appendChild(typingIndicator);
+        chatLog.scrollTop = chatLog.scrollHeight;
+        
+        // Prepare request data
+        const requestData = {
+          messages: messages,
+          conversationId: currentConversationId
+        };
+        
+        // Add file path if a file was uploaded
+        if (currentUploadedFile) {
+          requestData.filePath = currentUploadedFile.path;
+          // Reset the file upload UI
+          fileName.textContent = 'Attach a file';
+          fileInput.value = '';
+          currentUploadedFile = null;
+        }
+        
+        // Send the message to the server
+        try {
+          const response = await fetch('/api/chat', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+              'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                messages
-            })
-         })
-         .then(res => res.json())
-         .then(data => {
-            let newAssistantMessage = {"role": "assistant", "content": `${data.completion.content}`}
-            messages.push(newAssistantMessage)
-            const messageElement = document.createElement('div');
-            messageElement.classList.add('message');
-            messageElement.classList.add('message--received');
-            messageElement.innerHTML = `
-                <div class="message__text">${data.completion.content}</div>
-            `;
-            chatLog.appendChild(messageElement);
-            chatLog.scrollTop = chatLog.scrollHeight;
-         })
-        })
-    
+            body: JSON.stringify(requestData)
+          });
+          
+          const data = await response.json();
+          
+          // Remove typing indicator
+          chatLog.removeChild(typingIndicator);
+          
+          // Add assistant response to messages and UI
+          const assistantMessage = data.completion;
+          messages.push(assistantMessage);
+          appendMessageToUI(assistantMessage);
+          
+          // Scroll to bottom
+          chatLog.scrollTop = chatLog.scrollHeight;
+          
+          // Update conversation title with the first user message if this is a new conversation
+          const conversation = conversations.find(c => c.id === currentConversationId);
+          if (conversation && conversation.title === 'New Chat' && messageText) {
+            // Update the title locally
+            conversation.title = messageText.length > 30 
+              ? messageText.substring(0, 30) + '...' 
+              : messageText;
+            
+            // Re-render conversation list
+            renderConversationList();
+          }
+        } catch (error) {
+          console.error('Error sending message:', error);
+          // Remove typing indicator
+          chatLog.removeChild(typingIndicator);
+          
+          // Show error message
+          const errorElement = document.createElement('div');
+          errorElement.classList.add('message', 'message--received', 'error');
+          errorElement.innerHTML = `
+            <div class="message__avatar">
+              <i class="fas fa-robot"></i>
+            </div>
+            <div class="message__text">
+              Sorry, there was an error processing your request. Please try again.
+            </div>
+          `;
+          chatLog.appendChild(errorElement);
+        }
+      }
+      
+      // Add a message to the UI
+      function appendMessageToUI(message) {
+        const messageElement = document.createElement('div');
+        messageElement.classList.add('message');
+        
+        // Set appropriate classes and avatar icon based on role
+        let avatarIcon;
+        if (message.role === 'user') {
+          messageElement.classList.add('message--sent');
+          avatarIcon = 'fa-user';
+        } else {
+          messageElement.classList.add('message--received');
+          avatarIcon = 'fa-robot'; // Robot icon for Ralph
+        }
+        
+        // Convert line breaks to <br> and render markdown-like code blocks
+        let formattedContent = message.content
+          .replace(/\n/g, '<br>')
+          .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+        
+        // Add avatar and message content
+        messageElement.innerHTML = `
+          <div class="message__avatar">
+            <i class="fas ${avatarIcon}"></i>
+          </div>
+          <div class="message__text">${formattedContent}</div>
+        `;
+        
+        chatLog.appendChild(messageElement);
+      }
+      
+      // Export chat to JSON or CSV
+      function exportChat(format) {
+        if (!currentConversationId || messages.length === 0) {
+          alert('No conversation to export');
+          return;
+        }
+        
+        // Find the current conversation
+        const conversation = conversations.find(c => c.id === currentConversationId);
+        if (!conversation) return;
+        
+        // Use server-side export endpoints for better formatting
+        const url = `/api/export/${currentConversationId}/${format}`;
+        
+        // Create a hidden link and trigger download
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `conversation-${currentConversationId}.${format}`;
+        a.style.display = 'none';
+        
+        document.body.appendChild(a);
+        a.click();
+        
+        setTimeout(() => {
+          document.body.removeChild(a);
+        }, 100);
+        
+        // Close dropdown
+        exportDropdown.classList.remove('active');
+      }
+      
+      // Helper function to download a file
+      function downloadFile(content, filename, contentType) {
+        const blob = new Blob([content], { type: contentType });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        
+        document.body.appendChild(a);
+        a.click();
+        
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 100);
+      }
     </script>
   </body>
 </html>
-
 
