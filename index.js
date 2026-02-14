@@ -7,7 +7,13 @@ import rateLimit from "express-rate-limit";
 import Database from "better-sqlite3";
 import crypto from "crypto";
 import winston from "winston";
+import multer from "multer";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import "dotenv/config";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Structured logging with Winston
 const logger = winston.createLogger({
@@ -68,6 +74,16 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
   CREATE INDEX IF NOT EXISTS idx_session ON conversations(session_id);
+
+  CREATE TABLE IF NOT EXISTS file_uploads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_uploads_session ON file_uploads(session_id);
 `);
 
 const app = express();
@@ -83,6 +99,33 @@ const chatLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 20,
   message: { error: "Too many requests, please try again later" },
+});
+
+// File upload configuration
+const UPLOAD_DIR = path.join(__dirname, "uploads");
+const ALLOWED_EXTENSIONS = [".txt", ".md", ".json", ".yaml", ".yml", ".xml", ".csv", ".log", ".conf", ".cfg", ".ini", ".py", ".js", ".ts", ".java", ".go", ".rs", ".tf", ".dockerfile"];
+const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
+
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+    filename: (req, file, cb) => {
+      const uniqueName = `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${path.extname(file.originalname)}`;
+      cb(null, uniqueName);
+    },
+  }),
+  limits: { fileSize: MAX_FILE_SIZE },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+      return cb(new Error(`File type ${ext} not allowed. Allowed: ${ALLOWED_EXTENSIONS.join(", ")}`));
+    }
+    cb(null, true);
+  },
 });
 
 // API key authentication middleware
@@ -220,6 +263,90 @@ app.get("/analytics", authenticate, (req, res) => {
 
   logger.info("Analytics requested");
   res.json({ stats, daily_activity: dailyActivity });
+});
+
+// File upload and analysis endpoint
+app.post("/analyze", authenticate, chatLimiter, upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const filePath = req.file.path;
+    const fileContent = fs.readFileSync(filePath, "utf-8");
+
+    // Enforce max content length for LLM context
+    if (fileContent.length > 50000) {
+      fs.unlinkSync(filePath);
+      return res.status(400).json({ error: "File content too large for analysis (max 50k chars)" });
+    }
+
+    const sessionId = req.body.session_id || crypto.randomUUID();
+
+    logger.info("File analysis requested", {
+      sessionId,
+      filename: req.file.originalname,
+      size: req.file.size,
+    });
+
+    // Store the upload record
+    db.prepare(
+      "INSERT INTO file_uploads (session_id, original_name, stored_name, size_bytes) VALUES (?, ?, ?, ?)"
+    ).run(sessionId, req.file.originalname, req.file.filename, req.file.size);
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a cybersecurity expert. Analyze the following file for security vulnerabilities, misconfigurations, and best practice violations. Provide a structured report with severity ratings.",
+        },
+        {
+          role: "user",
+          content: `Analyze this file (${req.file.originalname}):\n\n${fileContent}`,
+        },
+      ],
+    });
+
+    const analysis = completion.choices[0].message;
+
+    // Store the analysis in conversation history
+    const insertStmt = db.prepare(
+      "INSERT INTO conversations (session_id, role, content) VALUES (?, ?, ?)"
+    );
+    insertStmt.run(sessionId, "user", `[File Upload] ${req.file.originalname}`);
+    insertStmt.run(sessionId, "assistant", analysis.content);
+
+    // Clean up uploaded file after analysis
+    fs.unlinkSync(filePath);
+
+    logger.info("File analysis completed", { sessionId, filename: req.file.originalname });
+
+    res.json({
+      analysis: analysis.content,
+      filename: req.file.originalname,
+      session_id: sessionId,
+    });
+  } catch (error) {
+    // Clean up file on error
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    logger.error("File analysis error", { error: error.message });
+    await sendWebhook("analysis_error", { error: error.message, endpoint: "/analyze" });
+    res.status(500).json({ error: "An internal error occurred during file analysis" });
+  }
+});
+
+// List uploaded files for a session
+app.get("/uploads/:sessionId", authenticate, (req, res) => {
+  const uploads = db
+    .prepare(
+      "SELECT original_name, size_bytes, uploaded_at FROM file_uploads WHERE session_id = ? ORDER BY uploaded_at DESC"
+    )
+    .all(req.params.sessionId);
+  res.json({ session_id: req.params.sessionId, uploads });
 });
 
 // Webhook test endpoint (admin use)

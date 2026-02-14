@@ -10,60 +10,122 @@
   </head>
   <body>
     <main>
-        <h1>AI Chatbot</h1>  
+        <h1>AI Chatbot</h1>
         <form action="">
-            <input type="text" name="message" id="message">
+            <input type="text" name="message" id="message" autocomplete="off">
             <button type="submit">Send</button>
+            <label class="upload-btn" for="file-upload" title="Upload file for analysis">&#128206;</label>
+            <input type="file" id="file-upload" accept=".txt,.md,.json,.yaml,.yml,.xml,.csv,.log,.conf,.py,.js,.ts,.java,.go,.rs,.tf" hidden>
         </form>
-        <div id="chat-log"> 
-
-        </div>
+        <div id="chat-log"></div>
     </main>
-	<script>
-        let messages = []
+    <script>
+        let messages = [];
+        let sessionId = null;
+        const API_KEY = 'your-api-key-here'; // Should be injected by config
         const chatLog = document.getElementById('chat-log');
         const message = document.getElementById('message');
         const form = document.querySelector('form');
-        form.addEventListener('submit', (e) => {
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // File upload handler
+        document.getElementById('file-upload').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const uploadMsg = document.createElement('div');
+            uploadMsg.classList.add('message', 'message--sent');
+            uploadMsg.innerHTML = `<div class="message__text">&#128206; Uploading ${escapeHtml(file.name)} for analysis...</div>`;
+            chatLog.appendChild(uploadMsg);
+            chatLog.scrollTop = chatLog.scrollHeight;
+
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                if (sessionId) formData.append('session_id', sessionId);
+
+                const res = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: { 'X-API-Key': API_KEY },
+                    body: formData
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.error || 'Upload failed');
+                }
+
+                const data = await res.json();
+                sessionId = data.session_id;
+
+                const analysisEl = document.createElement('div');
+                analysisEl.classList.add('message', 'message--received');
+                analysisEl.innerHTML = `<div class="message__text"><strong>Analysis of ${escapeHtml(data.filename)}:</strong><br>${escapeHtml(data.analysis)}</div>`;
+                chatLog.appendChild(analysisEl);
+                chatLog.scrollTop = chatLog.scrollHeight;
+            } catch (err) {
+                const errorEl = document.createElement('div');
+                errorEl.classList.add('message', 'message--error');
+                errorEl.innerHTML = `<div class="message__text">Error: ${escapeHtml(err.message)}</div>`;
+                chatLog.appendChild(errorEl);
+            }
+
+            e.target.value = ''; // Reset file input
+        });
+
+        form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const messageText = message.value;
-            const newMessage = {"role": "user", "content": `${messageText}`}
-            messages.push(newMessage)
+            const messageText = message.value.trim();
+            if (!messageText) return;
+
+            const newMessage = { role: "user", content: messageText };
+            messages.push(newMessage);
             message.value = '';
+
             const messageElement = document.createElement('div');
-            messageElement.classList.add('message');
-            messageElement.classList.add('message--sent');
-            messageElement.innerHTML = `
-                <div class="message__text">${messageText}</div>
-            `;
-         chatLog.appendChild(messageElement);
-         chatLog.scrollTop = chatLog.scrollHeight;
-         fetch('http://localhost:5000', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                messages
-            })
-         })
-         .then(res => res.json())
-         .then(data => {
-            let newAssistantMessage = {"role": "assistant", "content": `${data.completion.content}`}
-            messages.push(newAssistantMessage)
-            const messageElement = document.createElement('div');
-            messageElement.classList.add('message');
-            messageElement.classList.add('message--received');
-            messageElement.innerHTML = `
-                <div class="message__text">${data.completion.content}</div>
-            `;
+            messageElement.classList.add('message', 'message--sent');
+            messageElement.innerHTML = `<div class="message__text">${escapeHtml(messageText)}</div>`;
             chatLog.appendChild(messageElement);
             chatLog.scrollTop = chatLog.scrollHeight;
-         })
-        })
-    
+
+            try {
+                const res = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': API_KEY
+                    },
+                    body: JSON.stringify({ messages, session_id: sessionId })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.error || 'Request failed');
+                }
+
+                const data = await res.json();
+                sessionId = data.session_id;
+
+                const assistantMessage = { role: "assistant", content: data.completion.content };
+                messages.push(assistantMessage);
+
+                const replyElement = document.createElement('div');
+                replyElement.classList.add('message', 'message--received');
+                replyElement.innerHTML = `<div class="message__text">${escapeHtml(data.completion.content)}</div>`;
+                chatLog.appendChild(replyElement);
+                chatLog.scrollTop = chatLog.scrollHeight;
+            } catch (err) {
+                const errorElement = document.createElement('div');
+                errorElement.classList.add('message', 'message--error');
+                errorElement.innerHTML = `<div class="message__text">Error: ${escapeHtml(err.message)}</div>`;
+                chatLog.appendChild(errorElement);
+            }
+        });
     </script>
   </body>
 </html>
-
-
