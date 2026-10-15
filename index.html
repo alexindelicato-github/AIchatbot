@@ -1128,7 +1128,8 @@
           });
           
           if (!response.ok) {
-            throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+            const errorBody = await response.json().catch(() => ({}));
+            throw new Error(errorBody.error || `Server returned ${response.status}: ${response.statusText}`);
           }
           
           const data = await response.json();

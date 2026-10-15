@@ -20,6 +20,7 @@ An enhanced AI chatbot with chat history persistence and file upload capabilitie
 
 - 💬 **Chat with GPT-4**: Interact with a sophisticated AI trained to provide cybersecurity assistance
 - 📁 **File Upload**: Upload code files, configurations, or any text files for AI analysis
+- 🛡️ **Content Moderation**: User messages and attached files are screened with the OpenAI Moderation API before reaching GPT-4
 - 📜 **Chat History**: Conversations are saved and can be revisited
 - 🔄 **Conversation Management**: Create, rename, delete, and switch between conversations
 - 💾 **Export Options**: Download your conversations as JSON or CSV files
@@ -37,6 +38,7 @@ An enhanced AI chatbot with chat history persistence and file upload capabilitie
    ```
    OPENAI_API_KEY=your_api_key_here
    ```
+   Content moderation is on by default; set `MODERATION_ENABLED=false` to turn it off.
 
 ## Usage
 
@@ -144,6 +146,7 @@ The chatbot supports uploading the following file types for analysis:
 - Frontend: HTML, CSS, JavaScript (Vanilla)
 - Backend: Node.js, Express
 - AI: OpenAI GPT-4 API
+- Moderation: OpenAI Moderation API (`omni-moderation-latest`), see `moderation.js`
 - File Storage: Local file system
 - Chat History: JSON files stored in the `data` directory
 - Testing: Jest with jsdom for automated testing
@@ -171,6 +174,7 @@ This will run the complete test suite, which includes tests for:
 - `/data`: Stores conversation history
 - `/uploads`: Stores uploaded files
 - `index.js`: Main server file
+- `moderation.js`: Content moderation service
 - `index.html`: Frontend interface
 - `style.css`: Styling
 

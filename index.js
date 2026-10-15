@@ -13,6 +13,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import os from "os";
 import "dotenv/config";
+import { isModerationEnabled, moderateText } from "./moderation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -332,6 +333,24 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
     const chatMessages = filePrompt
       ? [...messages, { role: "user", content: filePrompt }]
       : messages;
+
+    // Screen the newest user input (and any attached file) before it reaches the model
+    if (isModerationEnabled()) {
+      const latestUser = [...messages].reverse().find((m) => m.role === "user");
+      const screenText = [latestUser?.content, filePrompt].filter(Boolean).join("\n\n");
+      const moderation = await moderateText(openai, screenText);
+
+      if (moderation.error) {
+        logger.warn("Moderation check failed, allowing request", { sessionId, error: moderation.error });
+      } else if (moderation.flagged) {
+        logger.warn("Chat request blocked by moderation", { sessionId, categories: moderation.categories });
+        await sendWebhook("moderation_flagged", { endpoint: "/api/chat", categories: moderation.categories });
+        return res.status(400).json({
+          error: "Your message was flagged by content moderation and was not sent",
+          categories: moderation.categories,
+        });
+      }
+    }
 
     const lastMessage = chatMessages[chatMessages.length - 1];
     const insertStmt = db.prepare(
