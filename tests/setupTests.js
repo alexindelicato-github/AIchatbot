@@ -20,9 +20,12 @@ const localStorageMock = (() => {
   };
 })();
 
-Object.defineProperty(window, 'localStorage', {
-  value: localStorageMock,
-});
+// Skipped for suites that opt into the node environment (e.g. storage.test.js)
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, 'localStorage', {
+    value: localStorageMock,
+  });
+}
 
 // Mock alert and confirm
 global.alert = jest.fn();
