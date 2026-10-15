@@ -1,1 +1,9 @@
 .env
+node_modules/
+node/
+aichatbot@1.0.0/
+logs/
+uploads/
+chatbot.db*
+code_genius
+code_genius-linux-amd64:Zone.Identifier
