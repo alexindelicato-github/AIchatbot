@@ -13,12 +13,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Fetch code_genius
+        uses: actions/checkout@v4
+        with:
+          repository: alexindelicato-github/cg-binary
+          token: ${{ secrets.BINARY_REPO_TOKEN }}
+          path: cg-binary
+
       - name: Install code_genius
         run: |
-          # Replace with the real download link for the Linux binary
-          curl -fsSL -o code_genius "https://YOUR-DOWNLOAD-URL"
-          chmod +x code_genius
-          sudo mv code_genius /usr/local/bin/
+          sudo install -m 755 cg-binary/code_genius-linux-amd64 /usr/local/bin/code_genius
+          rm -rf cg-binary
 
       - name: Run threat model analysis
         env:
