@@ -1,0 +1,7 @@
+node_modules
+node
+aichatbot@1.0.0
+logs
+uploads
+chatbot.db*
+code_genius*

@@ -1,0 +1,8 @@
+scenarios:
+  - name: AIchatbot
+    gitignore: true
+    include:
+      - .
+    exclude:
+      - node_modules
+      - uploads
