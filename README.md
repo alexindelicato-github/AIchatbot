@@ -21,6 +21,7 @@ An enhanced AI chatbot with chat history persistence and file upload capabilitie
 - 💬 **Chat with GPT-4**: Interact with a sophisticated AI trained to provide cybersecurity assistance
 - 📁 **File Upload**: Upload code files, configurations, or any text files for AI analysis
 - 🛡️ **Content Moderation**: User messages and attached files are screened with the OpenAI Moderation API before reaching GPT-4
+- 🔎 **CVE Enrichment**: CVE IDs mentioned in a message are looked up in the [OSV.dev](https://osv.dev) vulnerability database and the details are given to GPT-4 as reference context
 - 📜 **Chat History**: Conversations are saved and can be revisited
 - 🔄 **Conversation Management**: Create, rename, delete, and switch between conversations
 - 💾 **Export Options**: Download your conversations as JSON or CSV files
@@ -39,6 +40,7 @@ An enhanced AI chatbot with chat history persistence and file upload capabilitie
    OPENAI_API_KEY=your_api_key_here
    ```
    Content moderation is on by default; set `MODERATION_ENABLED=false` to turn it off.
+   CVE enrichment is on by default; set `CVE_LOOKUP_ENABLED=false` to turn it off (`CVE_LOOKUP_TIMEOUT_MS` sets the per-lookup timeout, default 3000).
 
 ## Usage
 
@@ -161,6 +163,7 @@ With S3 enabled, files are written under the `uploads/` key prefix with SSE-S3 e
 - Backend: Node.js, Express
 - AI: OpenAI GPT-4 API
 - Moderation: OpenAI Moderation API (`omni-moderation-latest`), see `moderation.js`
+- CVE enrichment: OSV.dev public API (`https://api.osv.dev/v1/vulns/<id>`, no API key), see `cveLookup.js`. Up to 5 CVE IDs from the newest user message are sent to OSV.dev; the server needs outbound HTTPS to `api.osv.dev`
 - File Storage: Local file system
 - Chat History: JSON files stored in the `data` directory
 - Testing: Jest with jsdom for automated testing
@@ -189,6 +192,7 @@ This will run the complete test suite, which includes tests for:
 - `/uploads`: Stores uploaded files
 - `index.js`: Main server file
 - `moderation.js`: Content moderation service
+- `cveLookup.js`: CVE enrichment service (OSV.dev)
 - `index.html`: Frontend interface
 - `style.css`: Styling
 

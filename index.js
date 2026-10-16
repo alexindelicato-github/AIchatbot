@@ -15,6 +15,7 @@ import os from "os";
 import "dotenv/config";
 import { isModerationEnabled, moderateText } from "./moderation.js";
 import { createUploadStore } from "./storage.js";
+import { isCveLookupEnabled, extractCveIds, lookupCves, formatCveContext } from "./cveLookup.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -365,6 +366,22 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
       }
     }
 
+    // Enrich with OSV.dev details for any CVE IDs in the newest user message.
+    // This context goes to the model only; it isn't stored with the conversation.
+    let cveContext = "";
+    let cveIds = [];
+    if (isCveLookupEnabled()) {
+      const latestUser = [...messages].reverse().find((m) => m.role === "user");
+      cveIds = extractCveIds(latestUser?.content);
+      if (cveIds.length) {
+        const { records, failures } = await lookupCves(cveIds);
+        if (failures.length) logger.warn("CVE lookup failed for some IDs", { sessionId, failures });
+        cveIds = records.map((r) => r.id);
+        cveContext = formatCveContext(records);
+        logger.info("CVE context added", { sessionId, cves: cveIds });
+      }
+    }
+
     const lastMessage = chatMessages[chatMessages.length - 1];
     const insertStmt = db.prepare(
       "INSERT INTO conversations (session_id, role, content) VALUES (?, ?, ?)"
@@ -381,6 +398,7 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
           content:
             "You are a cybersecurity expert, and will assist users in securing their applications. If the user shares files, analyze them carefully to provide security insights.",
         },
+        ...(cveContext ? [{ role: "system", content: cveContext }] : []),
         ...chatMessages,
       ],
     });
@@ -396,6 +414,7 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
     res.json({
       completion: assistantMessage,
       session_id: sessionId,
+      cves: cveIds,
     });
   } catch (error) {
     logger.error("Chat endpoint error", { error: error.message, stack: error.stack });
