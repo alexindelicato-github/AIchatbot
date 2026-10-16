@@ -22,6 +22,7 @@ An enhanced AI chatbot with chat history persistence and file upload capabilitie
 - 📁 **File Upload**: Upload code files, configurations, or any text files for AI analysis
 - 🛡️ **Content Moderation**: User messages and attached files are screened with the OpenAI Moderation API before reaching GPT-4
 - 🔎 **CVE Enrichment**: CVE IDs mentioned in a message are looked up in the [OSV.dev](https://osv.dev) vulnerability database and the details are given to GPT-4 as reference context
+- 📚 **Knowledge Base (RAG)**: Admins upload reference documents (policies, runbooks, standards), which are embedded and stored in a Qdrant vector database. Relevant excerpts are retrieved and given to GPT-4 with each question
 - 📜 **Chat History**: Conversations are saved and can be revisited
 - 🔄 **Conversation Management**: Create, rename, delete, and switch between conversations
 - 💾 **Export Options**: Download your conversations as JSON or CSV files
@@ -157,11 +158,33 @@ S3_SIGNED_URL_TTL=300   # optional, signed download URL lifetime in seconds
 
 With S3 enabled, files are written under the `uploads/` key prefix with SSE-S3 encryption, the public `/uploads` static route is disabled, and `GET /api/files/:name` redirects to a short-lived signed URL that forces a plain-text download. The IAM principal needs `s3:PutObject`, `s3:GetObject` and `s3:DeleteObject` on `arn:aws:s3:::your-bucket-name/uploads/*`. Keep the bucket's Block Public Access settings on.
 
+## Knowledge Base (RAG, optional)
+
+1. Start Qdrant: `QDRANT_API_KEY=<random-secret> docker compose up -d qdrant`. It listens on `127.0.0.1:6333` only.
+2. Add to `.env`:
+   ```
+   QDRANT_URL=http://localhost:6333
+   QDRANT_API_KEY=<same secret>
+   QDRANT_COLLECTION=knowledge_base   # optional
+   KB_TOP_K=4                          # optional, excerpts per question
+   KB_MIN_SCORE=0.3                    # optional, cosine similarity cutoff
+   ```
+3. Ingest documents (`.txt`, `.md`, `.json`, `.yaml`, `.yml`, `.csv`, max 1 MB) with the admin API key:
+   ```
+   curl -H "X-API-Key: $CHATBOT_API_KEY" -F file=@secure-coding-policy.md -F title="Secure Coding Policy" \
+     http://localhost:3001/api/kb/documents
+   ```
+   - `GET /api/kb/documents`: list ingested documents
+   - `DELETE /api/kb/documents/:id`: remove a document and its vectors
+
+Documents are split into roughly 1,000-character chunks and embedded with OpenAI `text-embedding-3-small`. On each chat message, the newest user message is embedded and the closest chunks are added to the prompt as untrusted reference material. `/api/chat` responses include a `sources` array listing the documents used. If Qdrant or the embeddings call fails, chat continues without knowledge-base context.
+
 ## Technical Details
 
 - Frontend: HTML, CSS, JavaScript (Vanilla)
 - Backend: Node.js, Express
 - AI: OpenAI GPT-4 API
+- Knowledge base: Qdrant vector database + OpenAI Embeddings API (`text-embedding-3-small`), see `knowledgeBase.js` and `docker-compose.yml`
 - Moderation: OpenAI Moderation API (`omni-moderation-latest`), see `moderation.js`
 - CVE enrichment: OSV.dev public API (`https://api.osv.dev/v1/vulns/<id>`, no API key), see `cveLookup.js`. Up to 5 CVE IDs from the newest user message are sent to OSV.dev; the server needs outbound HTTPS to `api.osv.dev`
 - File Storage: Local file system
@@ -193,6 +216,8 @@ This will run the complete test suite, which includes tests for:
 - `index.js`: Main server file
 - `moderation.js`: Content moderation service
 - `cveLookup.js`: CVE enrichment service (OSV.dev)
+- `knowledgeBase.js`: RAG knowledge base (chunking, embeddings, Qdrant)
+- `docker-compose.yml`: Qdrant vector database
 - `index.html`: Frontend interface
 - `style.css`: Styling
 

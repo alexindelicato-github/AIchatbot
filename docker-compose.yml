@@ -1,0 +1,18 @@
+# Qdrant vector database for the RAG knowledge base (see knowledgeBase.js).
+# Start with `docker compose up -d qdrant`, then set in .env:
+#   QDRANT_URL=http://localhost:6333
+#   QDRANT_API_KEY=<same value as below>
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333" # REST API, bound to localhost only
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY}
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  qdrant_data:

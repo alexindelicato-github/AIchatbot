@@ -16,6 +16,7 @@ import "dotenv/config";
 import { isModerationEnabled, moderateText } from "./moderation.js";
 import { createUploadStore } from "./storage.js";
 import { isCveLookupEnabled, extractCveIds, lookupCves, formatCveContext } from "./cveLookup.js";
+import { createKnowledgeBase, formatKnowledgeContext } from "./knowledgeBase.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -96,6 +97,15 @@ db.exec(`
     uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
   CREATE INDEX IF NOT EXISTS idx_uploads_session ON file_uploads(session_id);
+
+  CREATE TABLE IF NOT EXISTS kb_documents (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    chunk_count INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // ---------------------------------------------------------------------------
@@ -145,6 +155,31 @@ function extFilter(req, file, cb) {
 
 const analyzeUpload = multer({ storage: uploadStore.multerStorage, limits: { fileSize: ANALYZE_MAX_FILE_SIZE }, fileFilter: extFilter });
 const chatUpload = multer({ storage: uploadStore.multerStorage, limits: { fileSize: CHAT_MAX_FILE_SIZE }, fileFilter: extFilter });
+
+// ---------------------------------------------------------------------------
+// Knowledge base (RAG) — enabled when QDRANT_URL is set, see knowledgeBase.js
+// ---------------------------------------------------------------------------
+const KB_ALLOWED_EXTENSIONS = [".txt", ".md", ".json", ".yaml", ".yml", ".csv"];
+const KB_MAX_FILE_SIZE = 1 * 1024 * 1024; // 1 MB
+
+const knowledgeBase = createKnowledgeBase({ openai });
+if (knowledgeBase.enabled) {
+  knowledgeBase.ensureCollection()
+    .then(() => logger.info("Knowledge base ready", { collection: knowledgeBase.collection }))
+    .catch((err) => logger.error("Knowledge base unavailable", { error: err.message }));
+}
+
+const kbUpload = multer({
+  storage: multer.memoryStorage(), // documents live in Qdrant, not on disk/S3
+  limits: { fileSize: KB_MAX_FILE_SIZE },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!KB_ALLOWED_EXTENSIONS.includes(ext)) {
+      return cb(new Error(`File type ${ext} not allowed. Allowed: ${KB_ALLOWED_EXTENSIONS.join(", ")}`));
+    }
+    cb(null, true);
+  },
+});
 
 // Local disk only: serve uploaded files statically (NOT the whole project —
 // avoid origin's `express.static(".")`, which exposed source code, .env, etc.)
@@ -382,6 +417,22 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
       }
     }
 
+    // Retrieve knowledge-base excerpts relevant to the newest user message.
+    // They go to the model only; they aren't stored with the conversation.
+    let kbContext = "";
+    let sources = [];
+    if (knowledgeBase.enabled) {
+      const latestUser = [...messages].reverse().find((m) => m.role === "user");
+      try {
+        const hits = await knowledgeBase.search(latestUser?.content);
+        kbContext = formatKnowledgeContext(hits);
+        sources = [...new Map(hits.map((h) => [h.documentId, { id: h.documentId, title: h.title }])).values()];
+        if (hits.length) logger.info("Knowledge base context added", { sessionId, chunks: hits.length });
+      } catch (err) {
+        logger.warn("Knowledge base retrieval failed, continuing without it", { sessionId, error: err.message });
+      }
+    }
+
     const lastMessage = chatMessages[chatMessages.length - 1];
     const insertStmt = db.prepare(
       "INSERT INTO conversations (session_id, role, content) VALUES (?, ?, ?)"
@@ -399,6 +450,7 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
             "You are a cybersecurity expert, and will assist users in securing their applications. If the user shares files, analyze them carefully to provide security insights.",
         },
         ...(cveContext ? [{ role: "system", content: cveContext }] : []),
+        ...(kbContext ? [{ role: "system", content: kbContext }] : []),
         ...chatMessages,
       ],
     });
@@ -415,6 +467,7 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
       completion: assistantMessage,
       session_id: sessionId,
       cves: cveIds,
+      sources,
     });
   } catch (error) {
     logger.error("Chat endpoint error", { error: error.message, stack: error.stack });
@@ -590,6 +643,62 @@ app.get("/uploads/:sessionId", authenticate, (req, res) => {
     )
     .all(req.params.sessionId);
   res.json({ session_id: req.params.sessionId, uploads });
+});
+
+// ---- Knowledge base: ingest a reference document ----
+function requireKnowledgeBase(req, res, next) {
+  if (!knowledgeBase.enabled) {
+    return res.status(503).json({ error: "Knowledge base is not configured (set QDRANT_URL)" });
+  }
+  next();
+}
+
+app.post("/api/kb/documents", authenticate, requireKnowledgeBase, chatLimiter, kbUpload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    const documentId = crypto.randomUUID();
+    const title = (req.body?.title || req.file.originalname).slice(0, 200);
+    const text = req.file.buffer.toString("utf8");
+
+    const { chunks } = await knowledgeBase.ingest({ documentId, title, text });
+    if (!chunks) return res.status(400).json({ error: "Document is empty" });
+
+    db.prepare(
+      "INSERT INTO kb_documents (id, title, original_name, size_bytes, chunk_count) VALUES (?, ?, ?, ?, ?)"
+    ).run(documentId, title, req.file.originalname, req.file.size, chunks);
+
+    logger.info("Knowledge base document ingested", { documentId, title, chunks });
+    await sendWebhook("kb_document_ingested", { documentId, title, chunks });
+    res.status(201).json({ id: documentId, title, chunks });
+  } catch (error) {
+    logger.error("Knowledge base ingest error", { error: error.message });
+    res.status(500).json({ error: "Failed to ingest document" });
+  }
+});
+
+// ---- Knowledge base: list documents ----
+app.get("/api/kb/documents", authenticate, requireKnowledgeBase, (req, res) => {
+  const documents = db
+    .prepare("SELECT id, title, original_name, size_bytes, chunk_count, created_at FROM kb_documents ORDER BY created_at DESC")
+    .all();
+  res.json({ documents });
+});
+
+// ---- Knowledge base: delete a document and its vectors ----
+app.delete("/api/kb/documents/:id", authenticate, requireKnowledgeBase, async (req, res) => {
+  try {
+    const doc = db.prepare("SELECT id FROM kb_documents WHERE id = ?").get(req.params.id);
+    if (!doc) return res.status(404).json({ error: "Document not found" });
+
+    await knowledgeBase.deleteDocument(doc.id);
+    db.prepare("DELETE FROM kb_documents WHERE id = ?").run(doc.id);
+    logger.info("Knowledge base document deleted", { documentId: doc.id });
+    res.json({ success: true });
+  } catch (error) {
+    logger.error("Knowledge base delete error", { id: req.params.id, error: error.message });
+    res.status(500).json({ error: "Failed to delete document" });
+  }
 });
 
 // ---- Webhook connectivity test ----
