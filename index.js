@@ -14,6 +14,7 @@ import { fileURLToPath } from "url";
 import os from "os";
 import "dotenv/config";
 import { isModerationEnabled, moderateText } from "./moderation.js";
+import { createUploadStore } from "./storage.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -129,15 +130,9 @@ const ALLOWED_EXTENSIONS = [
 const ANALYZE_MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB — strict, for instant security analysis
 const CHAT_MAX_FILE_SIZE = 5 * 1024 * 1024;    // 5 MB — general chat attachments
 
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-const diskStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
-  filename: (req, file, cb) => {
-    const uniqueName = `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${path.extname(file.originalname)}`;
-    cb(null, uniqueName);
-  },
-});
+// S3 when S3_BUCKET is set, local disk otherwise — see storage.js
+const uploadStore = createUploadStore({ uploadDir: UPLOAD_DIR });
+logger.info("Upload storage initialised", { backend: uploadStore.backend });
 
 function extFilter(req, file, cb) {
   const ext = path.extname(file.originalname).toLowerCase();
@@ -147,12 +142,15 @@ function extFilter(req, file, cb) {
   cb(null, true);
 }
 
-const analyzeUpload = multer({ storage: diskStorage, limits: { fileSize: ANALYZE_MAX_FILE_SIZE }, fileFilter: extFilter });
-const chatUpload = multer({ storage: diskStorage, limits: { fileSize: CHAT_MAX_FILE_SIZE }, fileFilter: extFilter });
+const analyzeUpload = multer({ storage: uploadStore.multerStorage, limits: { fileSize: ANALYZE_MAX_FILE_SIZE }, fileFilter: extFilter });
+const chatUpload = multer({ storage: uploadStore.multerStorage, limits: { fileSize: CHAT_MAX_FILE_SIZE }, fileFilter: extFilter });
 
-// Serve uploaded files statically (NOT the whole project — avoid origin's
-// `express.static(".")`, which exposed source code, .env, etc.)
-app.use("/uploads", express.static(UPLOAD_DIR));
+// Local disk only: serve uploaded files statically (NOT the whole project —
+// avoid origin's `express.static(".")`, which exposed source code, .env, etc.)
+// With S3, downloads go through short-lived signed URLs instead.
+if (uploadStore.backend === "local") {
+  app.use("/uploads", express.static(UPLOAD_DIR));
+}
 
 // ---------------------------------------------------------------------------
 // API key auth — applied ONLY to endpoints meant for direct/API-style access.
@@ -268,25 +266,41 @@ app.delete("/api/conversations/:id", (req, res) => {
 });
 
 // ---- General file upload (chat attachments) ----
-app.post("/api/upload", chatUpload.single("file"), (req, res) => {
+app.post("/api/upload", chatUpload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
+    const storedName = await uploadStore.save(req.file);
     db.prepare(
       "INSERT INTO file_uploads (session_id, original_name, stored_name, size_bytes) VALUES (?, ?, ?, ?)"
-    ).run(req.body?.conversationId || null, req.file.originalname, req.file.filename, req.file.size);
+    ).run(req.body?.conversationId || null, req.file.originalname, storedName, req.file.size);
 
     res.json({
       success: true,
       file: {
         name: req.file.originalname,
-        path: req.file.filename,
+        path: storedName,
+        url: `/api/files/${encodeURIComponent(storedName)}`,
         size: req.file.size,
       },
     });
   } catch (error) {
     logger.error("Upload error", { error: error.message });
     res.status(500).json({ error: "Failed to upload file" });
+  }
+});
+
+// ---- Download an uploaded file (redirects to a signed S3 URL or the local static route) ----
+app.get("/api/files/:name", async (req, res) => {
+  try {
+    const name = path.basename(req.params.name);
+    const known = db.prepare("SELECT 1 FROM file_uploads WHERE stored_name = ?").get(name);
+    if (!known) return res.status(404).json({ error: "File not found" });
+
+    res.redirect(302, await uploadStore.downloadUrl(name));
+  } catch (error) {
+    logger.error("Download URL error", { error: error.message });
+    res.status(500).json({ error: "Failed to get download URL" });
   }
 });
 
@@ -314,12 +328,11 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
     // If a file was attached, read it and fold its content into the prompt
     let filePrompt = "";
     if (filePath) {
-      const fullPath = path.join(UPLOAD_DIR, path.basename(filePath)); // basename blocks path traversal
-      if (fs.existsSync(fullPath)) {
-        const stats = fs.statSync(fullPath);
-        const fileSizeInMB = stats.size / (1024 * 1024);
+      const stored = await uploadStore.read(filePath);
+      if (stored) {
+        const fileSizeInMB = stored.size / (1024 * 1024);
         if (fileSizeInMB <= 5) {
-          const fileContent = fs.readFileSync(fullPath, "utf8");
+          const fileContent = stored.content;
           const fileName = path.basename(filePath);
           filePrompt = `The user has uploaded a file named "${fileName}". Here is the content of the file:\n\n${fileContent}\n\nPlease analyze or respond to the content of this file.`;
         } else {
@@ -483,11 +496,11 @@ app.post("/analyze", authenticate, chatLimiter, analyzeUpload.single("file"), as
   try {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
-    const filePath = req.file.path;
-    const fileContent = fs.readFileSync(filePath, "utf-8");
+    const storedName = await uploadStore.save(req.file);
+    const { content: fileContent } = await uploadStore.read(storedName);
 
     if (fileContent.length > 50000) {
-      fs.unlinkSync(filePath);
+      await uploadStore.remove(storedName);
       return res.status(400).json({ error: "File content too large for analysis (max 50k chars)" });
     }
 
@@ -506,7 +519,7 @@ app.post("/analyze", authenticate, chatLimiter, analyzeUpload.single("file"), as
 
     db.prepare(
       "INSERT INTO file_uploads (session_id, original_name, stored_name, size_bytes) VALUES (?, ?, ?, ?)"
-    ).run(sessionId, req.file.originalname, req.file.filename, req.file.size);
+    ).run(sessionId, req.file.originalname, storedName, req.file.size);
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4",
@@ -531,7 +544,7 @@ app.post("/analyze", authenticate, chatLimiter, analyzeUpload.single("file"), as
     insertStmt.run(sessionId, "user", `[File Upload] ${req.file.originalname}`);
     insertStmt.run(sessionId, "assistant", analysis.content);
 
-    fs.unlinkSync(filePath);
+    await uploadStore.remove(storedName);
 
     logger.info("File analysis completed", { sessionId, filename: req.file.originalname });
 
@@ -541,8 +554,8 @@ app.post("/analyze", authenticate, chatLimiter, analyzeUpload.single("file"), as
       session_id: sessionId,
     });
   } catch (error) {
-    if (req.file?.path && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+    if (req.file?.filename) {
+      await uploadStore.remove(req.file.filename).catch(() => {});
     }
     logger.error("File analysis error", { error: error.message });
     await sendWebhook("analysis_error", { error: error.message, endpoint: "/analyze" });

@@ -141,6 +141,20 @@ The chatbot supports uploading the following file types for analysis:
 - Data files (.xml, .yaml, .yml, .sql)
 - Log files (.log)
 
+### S3 storage (optional)
+
+By default uploads are stored on local disk in `uploads/`. To store them in Amazon S3 instead, set:
+
+```
+S3_BUCKET=your-bucket-name
+AWS_REGION=us-east-1
+# Credentials come from the standard AWS provider chain (AWS_ACCESS_KEY_ID /
+# AWS_SECRET_ACCESS_KEY, a shared profile, or an instance/task role).
+S3_SIGNED_URL_TTL=300   # optional, signed download URL lifetime in seconds
+```
+
+With S3 enabled, files are written under the `uploads/` key prefix with SSE-S3 encryption, the public `/uploads` static route is disabled, and `GET /api/files/:name` redirects to a short-lived signed URL that forces a plain-text download. The IAM principal needs `s3:PutObject`, `s3:GetObject` and `s3:DeleteObject` on `arn:aws:s3:::your-bucket-name/uploads/*`. Keep the bucket's Block Public Access settings on.
+
 ## Technical Details
 
 - Frontend: HTML, CSS, JavaScript (Vanilla)
