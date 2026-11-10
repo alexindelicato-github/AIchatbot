@@ -1,0 +1,15 @@
+# Redis keeps team sessions when accounts are on (see accounts.js).
+# Start with `docker compose up -d redis`, then set in .env:
+#   REDIS_URL=redis://:<REDIS_PASSWORD>@localhost:6379
+services:
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379" # bound to localhost only
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
