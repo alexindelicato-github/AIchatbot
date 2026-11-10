@@ -200,3 +200,13 @@ This will run the complete test suite, which includes tests for:
 
 ISC
 >>>>>>> 0a16cf2b4d7095dd5fec7f51f86f7826d65e65fd
+
+
+## Team accounts, billing and agent mode
+
+Optional, and off until configured.
+
+- **Sign in with GitHub.** Set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` (a GitHub OAuth App whose callback is `PUBLIC_URL/auth/github/callback`), `SESSION_SECRET` and `REDIS_URL`. Sessions are kept in Redis (`docker compose up -d redis`). Once accounts are on, chat needs a signed-in user, and each conversation belongs to the user who started it. Logins listed in `ADMIN_GITHUB_LOGINS` are made admins on first sign-in.
+- **Billing.** Set `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and `STRIPE_PRO_PRICE_ID`. `POST /api/billing/checkout` starts a Stripe Checkout for the Pro plan; Stripe's signed webhook at `/api/billing/webhook` is the only thing that changes a team's plan. Free teams get 50 messages a day per user; Pro, 2,000 and agent mode.
+- **Agent mode.** Set `AGENT_TOOLS_ENABLED=true` and `TAVILY_API_KEY`. A chat request with `"useTools": true` lets the model search the web, read public pages and look up CVEs before answering. Fetched pages are checked first: http(s) only, no credentials, no private, loopback or link-local addresses (so not the cloud metadata service), no redirects, text only, and optionally only hosts in `FETCH_URL_ALLOWLIST`.
+- **Admin console API** (admins only): `GET /admin/users`, `PATCH /admin/users/:id/role`, `GET /admin/usage`, and `GET /admin/export/conversations`, a full export that is logged.

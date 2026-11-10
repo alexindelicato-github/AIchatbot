@@ -16,6 +16,10 @@ import "dotenv/config";
 import { isModerationEnabled, moderateText } from "./moderation.js";
 import { createUploadStore } from "./storage.js";
 import { isCveLookupEnabled, extractCveIds, lookupCves, formatCveContext } from "./cveLookup.js";
+import { createAccounts, isAccountsEnabled, requireUser } from "./accounts.js";
+import { createBilling, isBillingEnabled } from "./billing.js";
+import { completeWithTools, isAgentToolsEnabled } from "./agentTools.js";
+import { createAdmin } from "./admin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -109,8 +113,30 @@ app.use(helmet({
   // Allow the Font Awesome CDN used by index.html
   contentSecurityPolicy: false,
 }));
+// ---------------------------------------------------------------------------
+// Team accounts (GitHub sign-in, Redis sessions), billing and the admin console
+// ---------------------------------------------------------------------------
+// Each conversation belongs to the user who started it, when someone is signed in.
+try {
+  db.exec("ALTER TABLE conversation_meta ADD COLUMN user_id INTEGER");
+} catch {
+  // Already there.
+}
+const accounts = isAccountsEnabled() ? await createAccounts({ db, logger }) : null;
+const billing = accounts && isBillingEnabled() ? createBilling({ db, logger }) : null;
+// Stripe signs the raw body, so its webhook goes before the JSON parser.
+if (billing) app.use(billing.webhook);
+
 app.use(bodyParser.json({ limit: "1mb" }));
-app.use(cors({ origin: process.env.ALLOWED_ORIGINS?.split(",") || "*" }));
+app.use(cors({ origin: process.env.ALLOWED_ORIGINS?.split(",") || "*", credentials: Boolean(accounts) }));
+if (accounts) {
+  app.use(accounts.sessions);
+  app.use(accounts.loadUser);
+  app.use(accounts.router);
+  app.use(createAdmin({ db, logger }));
+  if (billing) app.use(billing.router);
+  logger.info("Team accounts enabled", { billing: Boolean(billing), agentTools: isAgentToolsEnabled() });
+}
 
 // Rate limiter applied to expensive/LLM-backed routes only
 const chatLimiter = rateLimit({
@@ -320,11 +346,23 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
     const sessionId = conversationId || crypto.randomUUID();
     const now = new Date().toISOString();
 
+    // With accounts on, chat needs a signed-in user within their plan's daily allowance.
+    if (accounts && !req.user) return res.status(401).json({ error: "Sign in first" });
+    const allowance = billing && req.user ? billing.allowance(req.user) : null;
+    if (allowance && allowance.used >= allowance.limit) {
+      return res.status(402).json({ error: `Daily limit of ${allowance.limit} messages reached on the ${allowance.plan} plan` });
+    }
+    // A conversation someone else started is not yours to continue.
+    if (req.user && conversationId) {
+      const owner = db.prepare("SELECT user_id FROM conversation_meta WHERE session_id = ?").get(conversationId);
+      if (owner?.user_id && owner.user_id !== req.user.id) return res.status(404).json({ error: "Conversation not found" });
+    }
+
     // Ensure a conversation_meta row exists for this session
     db.prepare(
-      `INSERT INTO conversation_meta (session_id, created_at, updated_at) VALUES (?, ?, ?)
+      `INSERT INTO conversation_meta (session_id, created_at, updated_at, user_id) VALUES (?, ?, ?, ?)
        ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at`
-    ).run(sessionId, now, now);
+    ).run(sessionId, now, now, req.user?.id ?? null);
 
     // If a file was attached, read it and fold its content into the prompt
     let filePrompt = "";
@@ -390,26 +428,35 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
 
     logger.info("Chat request received", { sessionId, messageCount: chatMessages.length });
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a cybersecurity expert, and will assist users in securing their applications. If the user shares files, analyze them carefully to provide security insights.",
-        },
-        ...(cveContext ? [{ role: "system", content: cveContext }] : []),
-        ...chatMessages,
-      ],
-    });
-
-    const assistantMessage = completion.choices[0].message;
+    const prompt = [
+      {
+        role: "system",
+        content:
+          "You are a cybersecurity expert, and will assist users in securing their applications. If the user shares files, analyze them carefully to provide security insights.",
+      },
+      ...(cveContext ? [{ role: "system", content: cveContext }] : []),
+      ...chatMessages,
+    ];
+    // Agent mode — web search, page reading, CVE lookups — when asked for and the plan allows it.
+    const useTools = isAgentToolsEnabled() && req.body.useTools === true && (!allowance || allowance.tools);
+    let assistantMessage;
+    let tokensUsed;
+    let toolCalls = 0;
+    if (useTools) {
+      ({ message: assistantMessage, tokens: tokensUsed, toolCalls } = await completeWithTools(openai, { model: "gpt-4o", messages: prompt, logger, sessionId }));
+    } else {
+      const completion = await openai.chat.completions.create({ model: "gpt-4", messages: prompt });
+      assistantMessage = completion.choices[0].message;
+      tokensUsed = completion.usage?.total_tokens;
+    }
     insertStmt.run(sessionId, assistantMessage.role, assistantMessage.content);
+    if (req.user) {
+      db.prepare("INSERT INTO usage (user_id, team_id, session_id, tokens, tool_calls) VALUES (?, ?, ?, ?, ?)").run(
+        req.user.id, req.user.team_id, sessionId, tokensUsed ?? 0, toolCalls
+      );
+    }
 
-    logger.info("Chat response sent", {
-      sessionId,
-      tokensUsed: completion.usage?.total_tokens,
-    });
+    logger.info("Chat response sent", { sessionId, tokensUsed, toolCalls });
 
     res.json({
       completion: assistantMessage,
